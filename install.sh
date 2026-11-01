@@ -497,7 +497,12 @@ remove_path_block() {
     fi
     local tmp
     tmp="$(mktemp)"
+    # Older installers could glue the start marker onto the last line of a file that had no
+    # trailing newline; keep that line's own content and drop the marker.
     awk -v start="$PATH_MARK" -v end="$PATH_END" '
+        !skip && (i = index($0, start)) > 1 && substr($0, i) == start {
+            print substr($0, 1, i - 1); skip = 1; next
+        }
         $0 == start { skip = 1; next }
         $0 == end { skip = 0; next }
         !skip' "$file" >"$tmp"
@@ -523,6 +528,10 @@ add_to_path() {
             continue
         fi
         mkdir -p "$(dirname "$file")"
+        # A file without a trailing newline would glue the marker onto its last line.
+        if [[ -s "$file" && -n "$(tail -c1 "$file")" ]]; then
+            printf '\n' >>"$file"
+        fi
         printf '%s\n%s\n%s\n' "$PATH_MARK" "$line" "$PATH_END" >>"$file"
         ok "$file"
     done < <(shell_rc_files)
