@@ -145,7 +145,30 @@ if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
 else
     bold="" dim="" red="" green="" yellow="" blue="" reset=""
 fi
-step() { printf '\n%s==>%s %s%s%s\n' "$blue" "$reset" "$bold" "$*" "$reset"; }
+# Overall progress: main sets progress_total to the number of steps it will run; each step
+# advances the bar. The same bar is drawn by install.ps1.
+progress_total=0
+progress_done=0
+BAR_WIDTH=24
+
+# bar DONE TOTAL: "[##########--------------]"
+bar() {
+    local filled=$(($1 * BAR_WIDTH / $2)) out="" i
+    for ((i = 0; i < BAR_WIDTH; i++)); do
+        if ((i < filled)); then out+="#"; else out+="-"; fi
+    done
+    printf '[%s]' "$out"
+}
+
+step() {
+    local progress=""
+    if ((progress_total > 0)); then
+        progress_done=$((progress_done + 1))
+        ((progress_done <= progress_total)) || progress_total=$progress_done
+        progress="$(bar "$progress_done" "$progress_total") $progress_done/$progress_total  "
+    fi
+    printf '\n%s==>%s %s%s%s%s\n' "$blue" "$reset" "$dim$progress$reset" "$bold" "$*" "$reset"
+}
 info() { printf '    %s\n' "$*"; }
 ok() { printf '    %s✓%s %s\n' "$green" "$reset" "$*"; }
 warn() { printf '%swarning:%s %s\n' "$yellow" "$reset" "$*" >&2; }
@@ -465,13 +488,62 @@ install_flywheel() {
         tail -n 30 "$work/configure.log" >&2
         die "configuring Flywheel failed (log above)"
     fi
-    run cmake --build "$build" --parallel "${jobs:-$(nproc 2>/dev/null || echo 2)}"
+    build_with_progress cmake --build "$build" --parallel "${jobs:-$(nproc 2>/dev/null || echo 2)}"
     step "Installing Flywheel into $prefix"
     run cmake --install "$build" --prefix "$prefix" >/dev/null
+    install_alias
     if ((!dry_run)); then
         "$prefix/bin/flywheel" --version >/dev/null || die "the installed compiler does not run"
+        "$prefix/bin/fw" --version >/dev/null || die "the fw alias does not run"
         ok "$("$prefix/bin/flywheel" --version)"
     fi
+}
+
+# Runs the build, drawing a progress bar from Ninja's "[12/345]" or Make's "[ 45%]" status lines
+# when the output is a terminal. The full output goes to a log, shown if the build fails.
+build_with_progress() {
+    printf '    %s$ %s%s\n' "$dim" "$*" "$reset" >&2
+    if ((dry_run)); then return; fi
+    if [[ ! -t 1 ]]; then
+        "$@"
+        return
+    fi
+    local log="$work/build.log"
+    if ! "$@" 2>&1 | tee "$log" | awk -v width="$BAR_WIDTH" '
+        {
+            if (match($0, /^\[ *[0-9]+\/[0-9]+\]/)) {
+                s = substr($0, RSTART + 1, RLENGTH - 2); gsub(/ /, "", s)
+                split(s, part, "/"); done = part[1] + 0; total = part[2] + 0
+            } else if (match($0, /^\[ *[0-9]+%\]/)) {
+                s = substr($0, RSTART + 1, RLENGTH - 3); gsub(/ /, "", s)
+                done = s + 0; total = 100
+            } else next
+            if (total <= 0) next
+            filled = int(done * width / total); out = ""
+            for (i = 0; i < width; i++) out = out (i < filled ? "#" : "-")
+            printf "\r    [%s] %3d%%", out, int(done * 100 / total); fflush()
+            shown = 1
+        }
+        END {
+            # The last status line is not always N/N; the build finished, so show it full.
+            if (shown) { out = ""; for (i = 0; i < width; i++) out = out "#"; printf "\r    [%s] 100%%\n", out }
+        }'; then
+        printf '\n' >&2
+        tail -n 40 "$log" >&2
+        die "building Flywheel failed (log above; full log: $log)"
+    fi
+}
+
+# `fw` is a shorter name for `flywheel`: a symlink next to it, so it works in every shell and
+# from scripts. Flywheel finds its runtime relative to the bin directory, which both share.
+install_alias() {
+    local alias="$prefix/bin/fw" existing
+    run ln -sfn flywheel "$alias"
+    existing="$(command -v fw 2>/dev/null || true)"
+    if [[ -n "$existing" && "$existing" != "$alias" ]]; then
+        warn "another fw is on PATH ($existing); it may shadow Flywheel's fw alias"
+    fi
+    ((dry_run)) || ok "fw -> flywheel"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -702,6 +774,9 @@ main() {
     if ((want_vscode)); then info "VS Code:   $EXTENSION_ID"; fi
     if ((dry_run)); then info "${yellow}dry run: nothing will be changed${reset}"; fi
 
+    # One step each: build tools, download (unless --source), build, install, PATH, extras.
+    progress_total=$((3 + modify_path + want_pulley + want_vscode))
+    if [[ -z "$source_dir" ]]; then progress_total=$((progress_total + 1)); fi
     make_workdir
     check_flywheel_deps
     install_flywheel
@@ -715,7 +790,7 @@ main() {
     fi
     printf '\n%sFlywheel is installed.%s\n' "$green" "$reset"
     case ":$PATH:" in
-    *":$prefix/bin:"*) info "Try: flywheel run hello.fw" ;;
+    *":$prefix/bin:"*) info "Try: flywheel run hello.fw  (or the short alias: fw run hello.fw)" ;;
     *)
         if ((modify_path)); then
             info "Open a new terminal (or run: export PATH=\"$prefix/bin:\$PATH\"), then try:"
@@ -723,6 +798,7 @@ main() {
             info "Add $prefix/bin to PATH, then try:"
         fi
         info "  echo 'print \"Hello, world!\"' > hello.fw && flywheel run hello.fw"
+        info "(fw is a short alias for flywheel: fw run hello.fw)"
         ;;
     esac
     if ((want_vscode)); then

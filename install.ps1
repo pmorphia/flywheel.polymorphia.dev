@@ -92,7 +92,27 @@ Set-StrictMode -Version 2.0
 
 # --- Output and prompts ------------------------------------------------------------------------
 
-function Write-Step([string]$Text) { Write-Host ''; Write-Host '==> ' -ForegroundColor Blue -NoNewline; Write-Host $Text -ForegroundColor White }
+# Overall progress: Main sets Total to the number of steps it will run; each step advances the
+# bar. The same bar is drawn by install.sh.
+$Progress = @{ Done = 0; Total = 0 }
+$BarWidth = 24
+
+# "[##########--------------]" for Done of Total.
+function Format-Bar([int]$Done, [int]$Total) {
+    $filled = [math]::Floor($Done * $BarWidth / $Total)
+    return '[' + ('#' * $filled) + ('-' * ($BarWidth - $filled)) + ']'
+}
+
+function Write-Step([string]$Text) {
+    Write-Host ''
+    Write-Host '==> ' -ForegroundColor Blue -NoNewline
+    if ($Progress.Total -gt 0) {
+        $Progress.Done++
+        if ($Progress.Done -gt $Progress.Total) { $Progress.Total = $Progress.Done }
+        Write-Host "$(Format-Bar $Progress.Done $Progress.Total) $($Progress.Done)/$($Progress.Total)  " -ForegroundColor DarkGray -NoNewline
+    }
+    Write-Host $Text -ForegroundColor White
+}
 function Write-Info([string]$Text) { Write-Host "    $Text" }
 function Write-Ok([string]$Text) { Write-Host '    ' -NoNewline; Write-Host 'OK ' -ForegroundColor Green -NoNewline; Write-Host $Text }
 function Write-Warn([string]$Text) { Write-Host 'warning: ' -ForegroundColor Yellow -NoNewline; Write-Host $Text }
@@ -128,6 +148,35 @@ function Invoke-Native {
         & $Command @Arguments
     }
     if ($LASTEXITCODE -ne 0) { Stop-Install "'$Command' failed with exit code $LASTEXITCODE" }
+}
+
+# Runs the build, drawing a progress bar from Ninja's "[12/345]" status lines when the output is a
+# console. The output is kept and shown if the build fails.
+function Invoke-Build {
+    param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @())
+    if ($DryRun -or [Console]::IsOutputRedirected) { Invoke-Native $Command $Arguments; return }
+    Write-Host "    `$ $Command $($Arguments -join ' ')" -ForegroundColor DarkGray
+    $ErrorActionPreference = 'Continue' # see Invoke-Probe
+    $log = New-Object System.Collections.Generic.List[string]
+    $shown = $false
+    & $Command @Arguments 2>&1 | ForEach-Object {
+        $line = "$_"
+        $log.Add($line)
+        if ($line -match '^\[\s*(\d+)/(\d+)\]' -and [int]$Matches[2] -gt 0) {
+            $done = [int]$Matches[1]; $total = [int]$Matches[2]
+            $percent = [math]::Floor($done * 100 / $total)
+            Write-Host ("`r    {0} {1,3}%" -f (Format-Bar $done $total), $percent) -NoNewline
+            $shown = $true
+        }
+    }
+    $code = $LASTEXITCODE
+    # The last status line is not always N/N; on success show the bar full.
+    if ($shown -and $code -eq 0) { Write-Host ("`r    {0} 100%" -f (Format-Bar 1 1)) -NoNewline }
+    if ($shown) { Write-Host '' }
+    if ($code -ne 0) {
+        $log | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
+        Stop-Install "'$Command' failed with exit code $code (log above)"
+    }
 }
 
 # Runs native commands whose stderr is redirected. Windows PowerShell 5.1 turns redirected
@@ -356,16 +405,38 @@ function Install-Flywheel {
     else { $configure += "-DCMAKE_PREFIX_PATH=$CondaEnv;$(Join-Path $CondaEnv 'Library')" }
     Write-Info 'This takes a few minutes; the first build also downloads SQLite and Mbed TLS.'
     Invoke-Native cmake $configure -Quiet
-    Invoke-Native cmake @('--build', $build, '--parallel', [string][Environment]::ProcessorCount)
+    Invoke-Build cmake @('--build', $build, '--parallel', [string][Environment]::ProcessorCount)
 
     Write-Step "Installing Flywheel into $Prefix"
     Invoke-Native cmake @('--install', $build, '--prefix', $Prefix) -Quiet
     if ($DryRun) { return }
     Copy-CompilerDlls
+    Install-Alias
     Write-DeveloperShortcut
     $version = & (Join-Path $Prefix 'bin\flywheel.exe') --version
     if ($LASTEXITCODE -ne 0) { Stop-Install 'the installed compiler does not run' }
+    & (Join-Path $Prefix 'bin\fw.exe') --version | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Install 'the fw alias does not run' }
     Write-Ok $version
+}
+
+# `fw` is a shorter name for `flywheel`: a hard link to flywheel.exe (no administrator rights or
+# Developer Mode needed, unlike a symlink), so it works from cmd, PowerShell, and scripts alike.
+# It is recreated on every install so it never points at an older compiler. Flywheel finds its
+# runtime relative to the bin directory, which both share.
+function Install-Alias {
+    $bin = Join-Path $Prefix 'bin'
+    $alias = Join-Path $bin 'fw.exe'
+    $target = Join-Path $bin 'flywheel.exe'
+    if (Test-Path $alias) { Remove-Item -Force $alias }
+    try {
+        New-Item -ItemType HardLink -Path $alias -Target $target | Out-Null
+    } catch {
+        Copy-Item $target $alias # file systems without hard links (FAT32, exFAT)
+    }
+    $existing = Get-Command fw -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($existing -and $existing.Source -ine $alias) { Write-Warn "another fw is on PATH ($($existing.Source)); it may shadow Flywheel's fw alias" }
+    Write-Ok 'fw -> flywheel'
 }
 
 # `flywheel run` and `flywheel build` link with MSVC, which needs the Visual Studio environment.
@@ -418,17 +489,76 @@ function Remove-FromPath {
 
 # --- Pulley ------------------------------------------------------------------------------------
 
-# A Python 3.12+ command (as an array: the launcher needs a version argument).
-function Find-Python {
-    foreach ($candidate in 'py -3', 'python', 'python3') {
-        $parts = @($candidate -split ' ')
-        if (-not (Test-Command $parts[0])) { continue }
-        $arguments = @($parts | Select-Object -Skip 1) + @('-c', 'import sys; print(sys.executable); print("%d.%d" % sys.version_info[:2])')
-        $output = Invoke-Probe { & $parts[0] @arguments 2>$null }
-        if ($LASTEXITCODE -ne 0 -or -not $output -or @($output).Count -lt 2) { continue }
-        if ([version]@($output)[1] -ge $PythonMinimum) { return @($output)[0] }
+# Every place a Python interpreter may be registered, as { Command; Arguments } to probe.
+# PATH alone is not enough: python.org installs may skip it, the py launcher may default to an
+# older version (py.ini, PY_PYTHON), and 'python' may be the Microsoft Store placeholder.
+function Get-PythonCandidates {
+    $minor = $PythonMinimum.Minor
+    # Only list what the py launcher knows: asking it for a version (py -3.13) can make the
+    # Python install manager download that version.
+    if (Test-Command py) {
+        foreach ($listing in @('--list-paths'), @('list', '--format=exe')) {
+            $listed = Invoke-Probe { & py @listing 2>$null }
+            if ($LASTEXITCODE -ne 0) { continue }
+            foreach ($line in @($listed)) {
+                if ("$line" -match '([A-Za-z]:\\.*?\\python[\d.]*\.exe)\s*$') { [pscustomobject]@{ Command = $Matches[1]; Arguments = @() } }
+            }
+        }
     }
-    return $null
+    # PEP 514 registrations (python.org, winget, and most distributions).
+    foreach ($root in 'HKCU:\Software\Python', 'HKLM:\Software\Python', 'HKLM:\Software\WOW6432Node\Python') {
+        if (-not (Test-Path $root)) { continue }
+        foreach ($key in @(Get-ChildItem $root -ErrorAction SilentlyContinue | Get-ChildItem -ErrorAction SilentlyContinue)) {
+            $props = Get-ItemProperty -LiteralPath "$($key.PSPath)\InstallPath" -ErrorAction SilentlyContinue
+            if (-not $props) { continue }
+            $exe = $null
+            if ($props.PSObject.Properties['ExecutablePath']) { $exe = $props.ExecutablePath }
+            elseif ($props.PSObject.Properties['(default)']) { $exe = Join-Path $props.'(default)' 'python.exe' }
+            if ($exe) { [pscustomobject]@{ Command = $exe; Arguments = @() } }
+        }
+    }
+    # Default install folders (python.org per-user and all-users, the Python install manager).
+    $folders = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python3*\python.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Python\pythoncore-3*\python.exe'),
+        (Join-Path $env:ProgramFiles 'Python3*\python.exe'),
+        (Join-Path $env:SystemDrive 'Python3*\python.exe'))
+    foreach ($pattern in $folders) {
+        foreach ($file in @(Get-ChildItem $pattern -ErrorAction SilentlyContinue)) { [pscustomobject]@{ Command = $file.FullName; Arguments = @() } }
+    }
+    $names = @('python', 'python3') + @((20..$minor) | ForEach-Object { "python3.$_" })
+    foreach ($command in @(Get-Command $names -CommandType Application -All -ErrorAction SilentlyContinue)) {
+        [pscustomobject]@{ Command = $command.Source; Arguments = @() }
+    }
+}
+
+# The full path of the newest Python 3.12+ found, or $null.
+function Find-Python {
+    # No double quotes in the program: Windows PowerShell 5.1 (and pwsh before 7.3) passes them
+    # to native commands unescaped, which turned the old probe into a Python syntax error and made
+    # every installed Python look missing.
+    $probe = 'import sys; print(sys.version_info[0], sys.version_info[1], sys.executable)'
+    $tried = @{}
+    $best = $null
+    $bestVersion = $null
+    foreach ($candidate in @(Get-PythonCandidates)) {
+        $key = "$($candidate.Command) $($candidate.Arguments -join ' ')".ToLowerInvariant()
+        if ($tried.ContainsKey($key)) { continue }
+        $tried[$key] = $true
+        if ($candidate.Command -match '[\\/]' -and -not (Test-Path -LiteralPath $candidate.Command)) { continue }
+        $command = $candidate.Command
+        $arguments = @($candidate.Arguments) + @('-c', $probe)
+        $output = Invoke-Probe { & $command @arguments 2>$null }
+        if ($LASTEXITCODE -ne 0) { continue }
+        foreach ($line in @($output)) {
+            if ("$line" -notmatch '^(\d+) (\d+) (.+)$') { continue }
+            $version = [version]"$($Matches[1]).$($Matches[2])"
+            $exe = $Matches[3].Trim()
+            if ($version -lt $PythonMinimum -or -not (Test-Path -LiteralPath $exe)) { continue }
+            if (-not $bestVersion -or $version -gt $bestVersion) { $best = $exe; $bestVersion = $version }
+        }
+    }
+    return $best
 }
 
 function Install-Pulley {
@@ -443,10 +573,15 @@ function Install-Pulley {
         $python = Find-Python
         if (-not $python -and -not $DryRun) { Stop-Install 'Python was installed but cannot be found; open a new terminal and rerun with -Pulley' }
     }
-    if ($python) { Write-Ok "Python ($python)" }
+    if ($python) { Write-Ok "Python ($python)" } else { $python = 'python' } # dry run only
     if (-not $DryRun) {
         Invoke-Probe { & $python -m pipx --version *> $null }
-        if ($LASTEXITCODE -ne 0) { Invoke-Native $python @('-m', 'pip', 'install', '--user', '--quiet', 'pipx') }
+        if ($LASTEXITCODE -ne 0) {
+            Invoke-Probe { & $python -m pip --version *> $null }
+            if ($LASTEXITCODE -ne 0) { Invoke-Native $python @('-m', 'ensurepip', '--default-pip') -Quiet }
+            Invoke-Native $python @('-m', 'pip', 'install', '--user', '--quiet', 'pipx')
+        }
+        Write-Ok "pipx $(Invoke-Probe { & $python -m pipx --version 2>$null })"
     }
     $src = Join-Path $Work 'pulley'
     if ($PulleySource) { Copy-Source $PulleySource $src } else { Get-Source $PulleyRepo $src }
@@ -609,6 +744,8 @@ function Main {
     if ($wantVSCode) { Write-Info "VS Code:   $ExtensionId" }
     if ($DryRun) { Write-Info 'dry run: nothing will be changed' }
 
+    # One step each: build tools, download (unless -Source), build, install, PATH, extras.
+    $Progress.Total = 3 + [int](-not $Source) + [int](-not $NoModifyPath) + [int]$wantPulley + [int]$wantVSCode
     $Work = New-WorkDirectory
     $environment = Save-Environment
     try {
@@ -632,6 +769,7 @@ function Main {
     Write-Info '  Developer PowerShell for VS 2022 (from the Start menu)'
     Write-Info 'then try:'
     Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; flywheel run hello.fw"
+    Write-Info '(fw is a short alias for flywheel: fw run hello.fw)'
     if ($wantVSCode) { Write-Info 'Restart VS Code so the extension finds flywheel on PATH.' }
 }
 
