@@ -1,0 +1,1556 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Flywheel",
+  "scopeName": "source.flywheel",
+  "patterns": [
+    {
+      "include": "#expression"
+    }
+  ],
+  "repository": {
+    "expression": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#declarations"
+        },
+        {
+          "include": "#imports"
+        },
+        {
+          "include": "#generic-types"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#markup"
+        },
+        {
+          "include": "#builtins"
+        },
+        {
+          "include": "#calls"
+        },
+        {
+          "include": "#braces"
+        },
+        {
+          "include": "#parens"
+        },
+        {
+          "include": "#brackets"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.flywheel",
+          "begin": "#",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.flywheel"
+            }
+          },
+          "end": "$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.flywheel",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#escapes"
+        },
+        {
+          "include": "#literal-braces"
+        },
+        {
+          "include": "#interpolation"
+        }
+      ]
+    },
+    "escapes": {
+      "patterns": [
+        {
+          "match": "\\\\(?:[\\\\\"nrt]|u\\{[0-9a-fA-F]+\\})",
+          "name": "constant.character.escape.flywheel"
+        },
+        {
+          "match": "\\\\.",
+          "name": "invalid.illegal.escape.flywheel"
+        }
+      ]
+    },
+    "literal-braces": {
+      "match": "\\{\\{|\\}\\}",
+      "name": "constant.character.escape.brace.flywheel"
+    },
+    "interpolation": {
+      "name": "meta.interpolation.flywheel",
+      "contentName": "meta.embedded.expression.flywheel",
+      "begin": "\\{(?!\\s|$)",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "match": ":(?![:=])[^{}\"'\\[\\]()]*(?=\\})",
+          "name": "constant.other.format-spec.flywheel"
+        },
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "markup-expression": {
+      "patterns": [
+        {
+          "include": "#markup-strings"
+        },
+        {
+          "include": "#declarations"
+        },
+        {
+          "include": "#imports"
+        },
+        {
+          "include": "#generic-types"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#markup"
+        },
+        {
+          "include": "#builtins"
+        },
+        {
+          "include": "#calls"
+        },
+        {
+          "include": "#markup-braces"
+        },
+        {
+          "include": "#markup-parens"
+        },
+        {
+          "include": "#markup-brackets"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
+    "markup-strings": {
+      "name": "string.quoted.double.flywheel",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#escapes"
+        },
+        {
+          "include": "#literal-braces"
+        },
+        {
+          "include": "#markup-interpolation"
+        }
+      ]
+    },
+    "markup-interpolation": {
+      "name": "meta.interpolation.flywheel",
+      "contentName": "meta.embedded.expression.flywheel",
+      "begin": "\\{(?!\\s|$)",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "match": ":(?![:=])[^{}\"'\\[\\]()]*(?=\\})",
+          "name": "constant.other.format-spec.flywheel"
+        },
+        {
+          "include": "#markup-expression"
+        }
+      ]
+    },
+    "markup-braces": {
+      "name": "meta.group.braces.flywheel",
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#markup-expression"
+        }
+      ]
+    },
+    "markup-parens": {
+      "name": "meta.group.parens.flywheel",
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#markup-expression"
+        }
+      ]
+    },
+    "markup-brackets": {
+      "name": "meta.group.brackets.flywheel",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#markup-expression"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.flywheel"
+            },
+            "2": {
+              "name": "entity.name.function.flywheel"
+            }
+          }
+        },
+        {
+          "match": "\\b(class)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.flywheel"
+            },
+            "2": {
+              "name": "entity.name.type.class.flywheel"
+            }
+          }
+        },
+        {
+          "match": "\\b(component)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.component.flywheel"
+            },
+            "2": {
+              "name": "entity.name.type.component.flywheel"
+            }
+          }
+        }
+      ]
+    },
+    "imports": {
+      "name": "meta.import.flywheel",
+      "begin": "\\bimport\\b",
+      "beginCaptures": {
+        "0": {
+          "name": "keyword.control.import.flywheel"
+        }
+      },
+      "end": "(?=;|#|$)",
+      "patterns": [
+        {
+          "match": "\\bas\\b",
+          "name": "keyword.control.import.flywheel"
+        },
+        {
+          "match": "\\*",
+          "name": "keyword.operator.wildcard.flywheel"
+        },
+        {
+          "match": "\\.",
+          "name": "punctuation.accessor.flywheel"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "entity.name.namespace.flywheel"
+        }
+      ]
+    },
+    "generic-types": {
+      "name": "meta.type.parameters.flywheel",
+      "begin": "\\b(array|tuple|map|Result|weak)\\s*(<)",
+      "beginCaptures": {
+        "1": {
+          "name": "support.type.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.typeparameters.begin.flywheel"
+        }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.typeparameters.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#generic-types"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "entity.name.type.flywheel"
+        },
+        {
+          "match": "[\\[\\],?.]",
+          "name": "punctuation.separator.type.flywheel"
+        }
+      ]
+    },
+    "types": {
+      "match": "\\b(?:bool|i8|i16|i32|i64|u8|u16|u32|u64|int|float|double|string|void|element|fragment|char|array|tuple|map|Result|weak|Error|RuntimeError|FileError|InputError|ProcessError|IndexError|KeyError|NumericError|AssertionError|JsonError|ResultError|CastError|SelectorError)\\b",
+      "name": "support.type.flywheel"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(?:if|then|else|while|do|for|in|end|break|continue|return|try|catch|finally|throw)\\b",
+          "name": "keyword.control.flywheel"
+        },
+        {
+          "match": "\\b(?:and|or|not)\\b",
+          "name": "keyword.operator.logical.flywheel"
+        },
+        {
+          "match": "\\b(?:public|private)\\b",
+          "name": "storage.modifier.flywheel"
+        },
+        {
+          "match": "\\b(?:var|const|returns|function|class|component)\\b",
+          "name": "storage.type.flywheel"
+        },
+        {
+          "match": "\\b(?:inst|attr)\\b",
+          "name": "variable.language.flywheel"
+        },
+        {
+          "match": "\\b(?:enum|interface|extends|implements|elements)\\b",
+          "name": "storage.type.flywheel"
+        },
+        {
+          "match": "\\b(?:match|case|defer|import|is|as)\\b",
+          "name": "keyword.control.flywheel"
+        },
+        {
+          "match": "\\b(?:readonly)\\b",
+          "name": "storage.modifier.flywheel"
+        },
+        {
+          "match": "\\b(?:super)\\b",
+          "name": "variable.language.flywheel"
+        }
+      ]
+    },
+    "constants": {
+      "match": "\\b(?:true|false|null)\\b",
+      "name": "constant.language.flywheel"
+    },
+    "numbers": {
+      "match": "(?<!\\w)(?:[0-9]+\\.[0-9]+(?:[eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+|[0-9]+)\\b",
+      "name": "constant.numeric.flywheel"
+    },
+    "builtins": {
+      "match": "\\b(?:print|input|len|typeof|render)\\b",
+      "name": "support.function.builtin.flywheel"
+    },
+    "calls": {
+      "patterns": [
+        {
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()",
+          "name": "entity.name.function.call.flywheel"
+        },
+        {
+          "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)(?=\\s+[^\\s=+*/%<>!])",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.flywheel"
+            },
+            "2": {
+              "name": "entity.name.function.call.flywheel"
+            }
+          }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "\\.\\.<|\\.\\.",
+          "name": "keyword.operator.range.flywheel"
+        },
+        {
+          "match": "==|!=|<=|>=|[<>]",
+          "name": "keyword.operator.comparison.flywheel"
+        },
+        {
+          "match": "[+*/%\\-]=|=",
+          "name": "keyword.operator.assignment.flywheel"
+        },
+        {
+          "match": "//|[+*/%\\-]",
+          "name": "keyword.operator.arithmetic.flywheel"
+        },
+        {
+          "match": "[?,:;]",
+          "name": "punctuation.separator.flywheel"
+        },
+        {
+          "match": "\\.",
+          "name": "punctuation.accessor.flywheel"
+        }
+      ]
+    },
+    "identifiers": {
+      "match": "[A-Za-z_][A-Za-z0-9_]*",
+      "name": "variable.other.readwrite.flywheel"
+    },
+    "entities": {
+      "match": "&(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);",
+      "name": "constant.character.entity.flywheel"
+    },
+    "markup-comment": {
+      "name": "comment.block.html.flywheel",
+      "begin": "<!--",
+      "end": "-->",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.end.flywheel"
+        }
+      }
+    },
+    "markup": {
+      "patterns": [
+        {
+          "include": "#fragment"
+        },
+        {
+          "include": "#style-element"
+        },
+        {
+          "include": "#script-element"
+        },
+        {
+          "include": "#void-element"
+        },
+        {
+          "include": "#element"
+        },
+        {
+          "include": "#multiline-void-element"
+        },
+        {
+          "include": "#multiline-element"
+        }
+      ]
+    },
+    "fragment": {
+      "name": "meta.fragment.flywheel",
+      "begin": "(<)(>)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "end": "(</)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#markup-content"
+        }
+      ]
+    },
+    "element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?=<(?!(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))([A-Za-z_][A-Za-z0-9_.:-]*)(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
+      "end": "(/>)|(</)(\\1)(\\s*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.tag.flywheel"
+        },
+        "5": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        },
+        {
+          "include": "#element-content"
+        }
+      ]
+    },
+    "void-element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?=<((?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
+      "end": "/?>",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        }
+      ]
+    },
+    "markup-content": {
+      "patterns": [
+        {
+          "include": "#markup-comment"
+        },
+        {
+          "include": "#fragment"
+        },
+        {
+          "include": "#style-element"
+        },
+        {
+          "include": "#script-element"
+        },
+        {
+          "include": "#nested-void-element"
+        },
+        {
+          "include": "#nested-element"
+        },
+        {
+          "include": "#literal-braces"
+        },
+        {
+          "match": "\\{(?=\\s|$)|(?:^|(?<=\\s))\\}|\\}(?=\\s|$)",
+          "name": "string.unquoted.markup.flywheel"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "match": "[^<{}&]+",
+          "name": "string.unquoted.markup.flywheel"
+        }
+      ]
+    },
+    "braces": {
+      "name": "meta.group.braces.flywheel",
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "parens": {
+      "name": "meta.group.parens.flywheel",
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "brackets": {
+      "name": "meta.group.brackets.flywheel",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.group.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.group.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "multiline-element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?:^\\s*|(?<=[=(:,\\[\\{])\\s*|(?<=\\breturn)\\s+|(?<=\\bprint)\\s+)(?=<(?!(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))([A-Za-z_][A-Za-z0-9_.:-]*)\\s*$)",
+      "end": "(/>)|(</)(\\1)(\\s*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.tag.flywheel"
+        },
+        "5": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        },
+        {
+          "include": "#element-content"
+        }
+      ]
+    },
+    "multiline-void-element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?:^\\s*|(?<=[=(:,\\[\\{])\\s*|(?<=\\breturn)\\s+|(?<=\\bprint)\\s+)(?=<((?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))\\s*$)",
+      "end": "/?>",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        }
+      ]
+    },
+    "nested-element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?=<(?!(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))([A-Za-z_][A-Za-z0-9_.:-]*)(?:(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>))|\\s*$))",
+      "end": "(/>)|(</)(\\1)(\\s*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.tag.flywheel"
+        },
+        "5": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        },
+        {
+          "include": "#element-content"
+        }
+      ]
+    },
+    "nested-void-element": {
+      "name": "meta.element.flywheel",
+      "begin": "(?=<((?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))(?:(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>))|\\s*$))",
+      "end": "/?>",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        }
+      ]
+    },
+    "tag-header": {
+      "name": "meta.tag.flywheel",
+      "begin": "(<)([A-Za-z_][A-Za-z0-9_.:-]*)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "2": {
+          "name": "entity.name.tag.flywheel"
+        }
+      },
+      "end": "(?=/?>)",
+      "patterns": [
+        {
+          "include": "#markup-strings"
+        },
+        {
+          "include": "#single-quoted-attribute"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "match": "(=)\\s*([^\\s\"'<>=`{}]+?)(?=\\s|/?>|$)",
+          "captures": {
+            "1": {
+              "name": "punctuation.separator.key-value.flywheel"
+            },
+            "2": {
+              "name": "string.unquoted.attribute-value.flywheel"
+            }
+          }
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_.:-]*",
+          "name": "entity.other.attribute-name.flywheel"
+        },
+        {
+          "match": "=",
+          "name": "punctuation.separator.key-value.flywheel"
+        }
+      ]
+    },
+    "element-content": {
+      "name": "meta.markup.content.flywheel",
+      "begin": ">",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "end": "(?=</)",
+      "patterns": [
+        {
+          "include": "#markup-content"
+        }
+      ]
+    },
+    "style-element": {
+      "name": "meta.element.style.flywheel",
+      "begin": "(?=<(style)(?:(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>))|\\s*$))",
+      "end": "(/>)|(</)(\\1)(\\s*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.tag.flywheel"
+        },
+        "5": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        },
+        {
+          "name": "meta.markup.content.flywheel",
+          "contentName": "meta.embedded.block.css.flywheel",
+          "begin": ">",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.tag.end.flywheel"
+            }
+          },
+          "end": "(?=</)",
+          "patterns": [
+            {
+              "include": "#css"
+            }
+          ]
+        }
+      ]
+    },
+    "script-element": {
+      "name": "meta.element.script.flywheel",
+      "begin": "(?=<(script)(?:(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>))|\\s*$))",
+      "end": "(/>)|(</)(\\1)(\\s*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.tag.flywheel"
+        },
+        "5": {
+          "name": "punctuation.definition.tag.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-header"
+        },
+        {
+          "name": "meta.markup.content.flywheel",
+          "contentName": "meta.embedded.block.javascript.flywheel",
+          "begin": ">",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.tag.end.flywheel"
+            }
+          },
+          "end": "(?=</)",
+          "patterns": [
+            {
+              "include": "#js"
+            }
+          ]
+        }
+      ]
+    },
+    "single-quoted-attribute": {
+      "name": "string.quoted.single.flywheel",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.flywheel"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#escapes"
+        },
+        {
+          "include": "#literal-braces"
+        },
+        {
+          "include": "#markup-interpolation"
+        }
+      ]
+    },
+    "css": {
+      "patterns": [
+        {
+          "include": "#css-comment"
+        },
+        {
+          "include": "#css-at-rule"
+        },
+        {
+          "include": "#css-block"
+        },
+        {
+          "include": "#css-selectors"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        }
+      ]
+    },
+    "css-comment": {
+      "name": "comment.block.css.flywheel",
+      "begin": "/\\*",
+      "end": "\\*/|(?=</)",
+      "patterns": [
+        {
+          "include": "#literal-braces"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        }
+      ]
+    },
+    "css-at-rule": {
+      "name": "meta.at-rule.css.flywheel",
+      "begin": "(@)([A-Za-z-]+)",
+      "beginCaptures": {
+        "0": {
+          "name": "keyword.control.at-rule.css.flywheel"
+        },
+        "1": {
+          "name": "punctuation.definition.keyword.css.flywheel"
+        }
+      },
+      "end": "(;)|(?=\\{\\{|\\{(?=\\s|$)|</)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.terminator.rule.css.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "begin": "\\(",
+          "end": "\\)|(?=</)",
+          "patterns": [
+            {
+              "match": "-?-?[A-Za-z_][A-Za-z0-9_-]*(?=\\s*:)",
+              "name": "support.type.property-name.css.flywheel"
+            },
+            {
+              "match": ":",
+              "name": "punctuation.separator.key-value.css.flywheel"
+            },
+            {
+              "include": "#css-values"
+            }
+          ]
+        },
+        {
+          "match": "\\b(?:and|or|not|only)\\b",
+          "name": "keyword.operator.logical.css.flywheel"
+        },
+        {
+          "include": "#css-values"
+        }
+      ]
+    },
+    "css-block": {
+      "name": "meta.property-list.css.flywheel",
+      "begin": "\\{\\{|\\{(?=\\s|$)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.property-list.begin.css.flywheel"
+        }
+      },
+      "end": "\\}\\}|(?:^|(?<=\\s))\\}|\\}(?=\\s|$)|(?=</)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.property-list.end.css.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#css-comment"
+        },
+        {
+          "include": "#css-property"
+        },
+        {
+          "include": "#css-at-rule"
+        },
+        {
+          "include": "#css-block"
+        },
+        {
+          "include": "#css-selectors"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        }
+      ]
+    },
+    "css-property": {
+      "name": "meta.property.css.flywheel",
+      "begin": "(?<![\\w-])(-?-?[A-Za-z_][A-Za-z0-9_-]*)\\s*(:)(?![^;{}]*\\{(?:\\{|\\s|$))",
+      "beginCaptures": {
+        "1": {
+          "name": "support.type.property-name.css.flywheel"
+        },
+        "2": {
+          "name": "punctuation.separator.key-value.css.flywheel"
+        }
+      },
+      "end": "(;)|(?=\\}\\}|(?:^|(?<=\\s))\\}|\\}(?=\\s|$)|</)|$",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.terminator.rule.css.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#css-values"
+        }
+      ]
+    },
+    "css-values": {
+      "patterns": [
+        {
+          "include": "#css-comment"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "include": "#css-string"
+        },
+        {
+          "match": "!\\s*important\\b",
+          "name": "keyword.other.important.css.flywheel"
+        },
+        {
+          "match": "#[0-9a-fA-F]{3,8}(?![\\w-])",
+          "name": "constant.other.color.rgb-value.css.flywheel"
+        },
+        {
+          "name": "meta.function.css.flywheel",
+          "begin": "(-?-?[A-Za-z_][A-Za-z0-9_-]*)(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "support.function.css.flywheel"
+            },
+            "2": {
+              "name": "punctuation.section.function.begin.css.flywheel"
+            }
+          },
+          "end": "\\)|(?=</)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.function.end.css.flywheel"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#css-values"
+            }
+          ]
+        },
+        {
+          "include": "#css-number"
+        },
+        {
+          "match": "(?<=\\})(?:%|[A-Za-z]+)",
+          "name": "keyword.other.unit.css.flywheel"
+        },
+        {
+          "match": "-?-?[A-Za-z_][A-Za-z0-9_-]*",
+          "name": "support.constant.property-value.css.flywheel"
+        },
+        {
+          "match": "[,/]",
+          "name": "punctuation.separator.css.flywheel"
+        }
+      ]
+    },
+    "css-number": {
+      "match": "(?<![\\w-])([-+]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?)(%|[A-Za-z]+)?",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.css.flywheel"
+        },
+        "2": {
+          "name": "keyword.other.unit.css.flywheel"
+        }
+      }
+    },
+    "css-string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.css.flywheel",
+          "begin": "\"",
+          "end": "\"|$|(?=</)",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.css.flywheel"
+            },
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.css.flywheel",
+          "begin": "'",
+          "end": "'|$|(?=</)",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.css.flywheel"
+            },
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        }
+      ]
+    },
+    "css-selectors": {
+      "patterns": [
+        {
+          "match": "(\\.)(-?-?[A-Za-z_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.entity.css.flywheel"
+            }
+          },
+          "name": "entity.other.attribute-name.class.css.flywheel"
+        },
+        {
+          "match": "(#)(-?-?[A-Za-z_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.entity.css.flywheel"
+            }
+          },
+          "name": "entity.other.attribute-name.id.css.flywheel"
+        },
+        {
+          "match": "(::?)([A-Za-z-]+)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.entity.css.flywheel"
+            }
+          },
+          "name": "entity.other.attribute-name.pseudo-class.css.flywheel"
+        },
+        {
+          "name": "meta.attribute-selector.css.flywheel",
+          "begin": "\\[",
+          "end": "\\]|(?=</)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.entity.begin.css.flywheel"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.entity.end.css.flywheel"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#css-string"
+            },
+            {
+              "match": "[~|^$*]?=",
+              "name": "keyword.operator.pattern.css.flywheel"
+            },
+            {
+              "match": "-?-?[A-Za-z_][A-Za-z0-9_-]*",
+              "name": "entity.other.attribute-name.css.flywheel"
+            }
+          ]
+        },
+        {
+          "begin": "\\(",
+          "end": "\\)|(?=</)",
+          "patterns": [
+            {
+              "include": "#css-selectors"
+            },
+            {
+              "include": "#css-number"
+            }
+          ]
+        },
+        {
+          "match": "\\*",
+          "name": "entity.name.tag.wildcard.css.flywheel"
+        },
+        {
+          "include": "#css-number"
+        },
+        {
+          "match": "-?-?[A-Za-z_][A-Za-z0-9_-]*",
+          "name": "entity.name.tag.css.flywheel"
+        },
+        {
+          "match": "[>+~]",
+          "name": "keyword.operator.combinator.css.flywheel"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.list.comma.css.flywheel"
+        }
+      ]
+    },
+    "js": {
+      "patterns": [
+        {
+          "name": "comment.block.js.flywheel",
+          "begin": "/\\*",
+          "end": "\\*/|(?=</)",
+          "patterns": [
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "name": "comment.line.double-slash.js.flywheel",
+          "begin": "//",
+          "end": "$|(?=</)",
+          "patterns": [
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.js.flywheel",
+          "begin": "\"",
+          "end": "\"|$|(?=</)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.js.flywheel"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.js.flywheel"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.js.flywheel"
+            },
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.js.flywheel",
+          "begin": "'",
+          "end": "'|$|(?=</)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.js.flywheel"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.js.flywheel"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.js.flywheel"
+            },
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "name": "string.template.js.flywheel",
+          "begin": "`",
+          "end": "`|(?=</)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.js.flywheel"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.js.flywheel"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.js.flywheel"
+            },
+            {
+              "include": "#literal-braces"
+            },
+            {
+              "include": "#markup-interpolation"
+            },
+            {
+              "include": "#entities"
+            }
+          ]
+        },
+        {
+          "match": "\\{\\{|\\}\\}|\\{(?=\\s|$)|(?:^|(?<=\\s))\\}|\\}(?=\\s|$)",
+          "name": "punctuation.section.block.js.flywheel"
+        },
+        {
+          "include": "#markup-interpolation"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "match": "\\b(function)(?:\\s*(\\*))?\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.js.flywheel"
+            },
+            "2": {
+              "name": "keyword.generator.asterisk.js.flywheel"
+            },
+            "3": {
+              "name": "entity.name.function.js.flywheel"
+            }
+          }
+        },
+        {
+          "match": "\\b(class)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.js.flywheel"
+            },
+            "2": {
+              "name": "entity.name.type.class.js.flywheel"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w$.])(?:if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|yield|await)(?![\\w$])",
+          "name": "keyword.control.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$.])(?:import|export|from)(?![\\w$])",
+          "name": "keyword.control.import.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$.])(?:var|let|const|function|class|extends|async|static)(?![\\w$])",
+          "name": "storage.type.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$.])(?:new|delete|typeof|instanceof|in|of|void)(?![\\w$])",
+          "name": "keyword.operator.expression.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$.])(?:this|super)(?![\\w$])",
+          "name": "variable.language.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$.])(?:true|false|null|undefined|NaN|Infinity)(?![\\w$])",
+          "name": "constant.language.js.flywheel"
+        },
+        {
+          "match": "(?<![\\w$])(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:[0-9][0-9_]*(?:\\.[0-9_]*)?|\\.[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)?)n?(?![\\w$])",
+          "name": "constant.numeric.js.flywheel"
+        },
+        {
+          "match": "(\\.)?([A-Za-z_$][A-Za-z0-9_$]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.js.flywheel"
+            },
+            "2": {
+              "name": "entity.name.function.js.flywheel"
+            }
+          }
+        },
+        {
+          "match": "(\\.)([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.js.flywheel"
+            },
+            "2": {
+              "name": "variable.other.property.js.flywheel"
+            }
+          }
+        },
+        {
+          "match": "=>",
+          "name": "storage.type.function.arrow.js.flywheel"
+        },
+        {
+          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||\\?\\?|\\.\\.\\.|[-+*/%&|^!~?:<>]=?|=",
+          "name": "keyword.operator.js.flywheel"
+        },
+        {
+          "match": "[;,]",
+          "name": "punctuation.separator.js.flywheel"
+        },
+        {
+          "match": "[A-Za-z_$][A-Za-z0-9_$]*",
+          "name": "variable.other.readwrite.js.flywheel"
+        }
+      ]
+    }
+  }
+}

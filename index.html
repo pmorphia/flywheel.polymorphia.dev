@@ -3,13 +3,412 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Flywheel</title>
+<meta name="description" content="Flywheel — a compiled language with native markup. Try it in the browser: playground, live app preview, pmsh, tutorials and docs.">
+<meta name="theme-color" content="#08080a">
+<link rel="icon" href="logo.png">
+<link rel="preload" href="logo.png" as="image">
+<script>
+  // Arriving from polymorphia.dev: the logo is already on screen there, centred at the hand-off
+  // size. Read that state before first paint so this page's first frame matches it exactly.
+  (function () {
+    var h = new URLSearchParams(location.hash.slice(1));
+    if (h.get("from") === "pm" && Math.abs(Date.now() - +h.get("t")) < 4000) {
+      window.__handoff = { a: +h.get("a") || 0, w: +h.get("w") || 0, s: +h.get("s") || 0, t: +h.get("t") };
+      document.documentElement.classList.add("arrive");
+    }
+    if (h.get("from")) history.replaceState(null, "", location.pathname + location.search);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
 <style>
-  html, body { height: 100%; margin: 0; }
-  body { display: flex; align-items: center; justify-content: center;
-         font-family: system-ui, sans-serif; font-size: 2rem; background: #fff; color: #111; }
-  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } }
+  :root {
+    color-scheme: dark;
+    --bg: #08080a;
+    --panel: #0e0e12;
+    --panel2: #121217;
+    --fg: #f2f2ee;
+    --dim: #8b8b94;
+    --faint: #4a4a52;
+    --line: #22222a;
+    --line2: #2c2c35;
+    --acc: #d4ff3a;
+    --cyan: #7dd3fc;
+    --violet: #c4b5fd;
+    --amber: #fbbf24;
+    --red: #ff6b6b;
+    --green: #86efac;
+    --pink: #f9a8d4;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --head: 56px;
+    --ease: cubic-bezier(.2, .7, .2, 1);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 var(--mono); -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+  }
+  ::selection { background: var(--acc); color: var(--bg); }
+  a { color: var(--acc); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+  button { font: inherit; color: inherit; }
+  kbd { font: inherit; font-size: 10.5px; color: var(--dim); border: 1px solid var(--line2); border-radius: 4px; padding: 0 4px; }
+
+  /* ---------- arrival choreography ---------- */
+  /* the logo that carried over from polymorphia.dev; JS flies it into the header */
+  #mark {
+    position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
+    transform-origin: 50% 50%; will-change: transform; display: none;
+  }
+  .arrive #mark { display: block; }
+  .ui { transition: opacity .6s var(--ease), transform .7s var(--ease); }
+  .arrive .ui { opacity: 0; transform: translateY(10px); }
+  .arrive .ui.in { opacity: 1; transform: none; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20; height: var(--head);
+    display: flex; align-items: center; gap: 18px; padding: 0 16px;
+    background: rgba(8, 8, 10, .86); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+  .brand:hover { text-decoration: none; }
+  .mark-slot { width: 30px; height: 30px; flex: none; position: relative; }
+  .mark-slot img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .brand small { font-weight: 400; font-size: 11px; color: var(--dim); border: 1px solid var(--line2); border-radius: 999px; padding: 1px 8px; }
+  nav.tabs { display: flex; gap: 4px; margin-left: 10px; }
+  nav.tabs a {
+    color: var(--dim); padding: 6px 10px; border-radius: 7px; font-size: 13px;
+  }
+  nav.tabs a:hover { color: var(--fg); text-decoration: none; background: rgba(255,255,255,.04); }
+  nav.tabs a[aria-current="page"] { color: var(--fg); background: rgba(255,255,255,.07); }
+  .head-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px;
+    border: 1px solid var(--line2); border-radius: 8px; background: transparent; cursor: pointer;
+    font-size: 12.5px; color: var(--fg); white-space: nowrap; text-decoration: none;
+  }
+  .btn:hover { border-color: var(--faint); text-decoration: none; background: rgba(255,255,255,.03); }
+  .btn.acc { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
+  .btn.acc:hover { background: #e2ff70; }
+  .btn.ghost { border-color: transparent; color: var(--dim); }
+  .btn.ghost:hover { color: var(--fg); }
+  .btn svg { width: 14px; height: 14px; }
+
+  /* ---------- workspace ---------- */
+  main { height: calc(100dvh - var(--head)); }
+  .work {
+    height: 100%; display: grid; gap: 10px; padding: 10px;
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+    grid-template-areas: "editor side";
+  }
+  body.view-learn .work { grid-template-columns: minmax(280px, .78fr) minmax(0, 1fr) minmax(0, .9fr); grid-template-areas: "lesson editor side"; }
+  body.view-docs .work { display: none; }
+  .pane {
+    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .pane-bar {
+    flex: none; height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px;
+    border-bottom: 1px solid var(--line); font-size: 12px; color: var(--dim);
+  }
+  .pane-bar .title { color: var(--fg); font-weight: 500; }
+  .pane-bar .grow { flex: 1; }
+  .pane-bar .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+  .pane-bar select {
+    font: inherit; font-size: 12px; color: var(--fg); background: var(--panel2); border: 1px solid var(--line2);
+    border-radius: 7px; height: 28px; padding: 0 8px; max-width: 46%;
+  }
+  #lesson { grid-area: lesson; display: none; }
+  body.view-learn #lesson { display: flex; }
+  .editor { grid-area: editor; }
+  .side { grid-area: side; display: grid; grid-template-rows: minmax(0, 1.08fr) minmax(170px, 1fr); gap: 10px; min-height: 0; min-width: 0; }
+
+  /* editor */
+  .ed-body { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: auto minmax(0, 1fr); scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+  .gutter {
+    padding: 14px 10px 40px 14px; text-align: right; color: var(--faint); user-select: none;
+    font-size: 13px; line-height: 1.6; white-space: pre; position: sticky; left: 0; background: var(--panel); z-index: 1;
+  }
+  .gutter .on { color: var(--dim); }
+  .code { display: grid; min-width: 0; }
+  .code > * {
+    grid-area: 1 / 1; margin: 0; padding: 14px 18px 40px 6px; border: 0;
+    font: 13px/1.6 var(--mono); white-space: pre; tab-size: 4; letter-spacing: 0;
+  }
+  .code pre { pointer-events: none; color: #d7d7de; min-width: max-content; }
+  .code textarea {
+    resize: none; outline: none; background: transparent; color: transparent; caret-color: var(--acc);
+    overflow: hidden; width: 100%; min-width: max-content;
+  }
+  .code textarea::selection { background: rgba(212, 255, 58, .22); color: transparent; }
+  .ed-status { flex: none; display: flex; gap: 14px; padding: 6px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }
+  .ed-status .ok { color: var(--green); } .ed-status .bad { color: var(--red); }
+
+  /* syntax colours (scopes from the vscode-flywheel grammar) */
+  .t-kw { color: var(--violet); } .t-self { color: var(--pink); }
+  .t-ty { color: var(--cyan); } .t-fn { color: #f2f2ee; font-weight: 500; }
+  .t-s { color: var(--green); } .t-esc { color: var(--amber); }
+  .t-interp { color: var(--amber); } .t-n, .t-lit { color: var(--amber); }
+  .t-c { color: var(--faint); font-style: italic; }
+  .t-op { color: #a3a3ad; } .t-p { color: #8b8b94; }
+  .t-tag { color: var(--acc); } .t-tagp { color: #7d8a52; } .t-attr { color: var(--cyan); }
+  .t-spec { color: #e0b65a; font-style: italic; }
+  .t-ns { color: var(--cyan); } .t-err { color: var(--red); text-decoration: underline wavy; }
+
+  /* app preview */
+  .app-frame { flex: 1; min-height: 0; position: relative; background: #fff; display: flex; flex-direction: column; }
+  .app-url {
+    flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: #ececef; color: #555; font-size: 11.5px; border-bottom: 1px solid #ddd;
+  }
+  .app-url .dots { display: flex; gap: 5px; } .app-url .dots i { width: 9px; height: 9px; border-radius: 50%; background: #cfcfd4; }
+  .app-url span.u { flex: 1; background: #fff; border-radius: 6px; padding: 2px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #preview { flex: 1; width: 100%; border: 0; background: #fff; display: block; }
+  .app-empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: var(--panel); color: var(--dim); text-align: center; padding: 24px; font-size: 12.5px;
+  }
+  .app-empty b { color: var(--fg); font-size: 14px; }
+  .app-empty code { color: var(--acc); }
+  .app-empty .mini { width: 54px; opacity: .25; animation: idle 14s linear infinite; }
+  @keyframes idle { to { transform: rotate(360deg); } }
+  .app-frame.has-app .app-empty { display: none; }
+
+  /* pmsh */
+  .term-body {
+    flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; font-size: 13px; line-height: 1.6; cursor: text;
+    scrollbar-width: thin; scrollbar-color: var(--line2) transparent; overscroll-behavior: contain;
+  }
+  .ln { white-space: pre-wrap; word-break: break-word; min-height: 1.6em; }
+  .o-dim { color: var(--dim); } .o-acc { color: var(--acc); } .o-err { color: var(--red); } .o-cyan { color: var(--cyan); }
+  .o-vio { color: var(--violet); } .o-ok { color: var(--green); } .o-amb { color: var(--amber); }
+  .ps1 .u { color: var(--acc); } .ps1 .at { color: var(--faint); } .ps1 .d { color: var(--cyan); } .ps1 .s { color: var(--acc); }
+  .ps1 .fw { color: var(--violet); }
+  .prompt { display: flex; gap: 1ch; align-items: baseline; }
+  .field { position: relative; flex: 1; min-width: 0; }
+  .field .hl, .field input {
+    font: inherit; letter-spacing: 0; margin: 0; padding: 0; border: 0; width: 100%; white-space: pre; overflow: hidden;
+  }
+  .field .hl { position: absolute; inset: 0; pointer-events: none; color: var(--fg); }
+  .field input { position: relative; background: transparent; color: transparent; caret-color: var(--acc); outline: none; }
+  .ghost { color: var(--faint); }
+  .k-cmd { color: var(--acc); } .k-arg { color: var(--fg); } .k-flag { color: var(--cyan); } .k-str { color: var(--green); } .k-bad { color: var(--red); } .k-pre { color: #b8c98a; }
+  .menu { display: flex; flex-wrap: wrap; column-gap: 2ch; margin-left: 3ch; font-size: 12px; }
+  .menu .it { color: var(--dim); cursor: pointer; } .menu .it.sel { color: var(--bg); background: var(--acc); }
+  .menu .it .ds { color: var(--faint); margin-left: 1ch; } .menu .it.sel .ds { color: #3b4710; }
+
+  /* lesson + docs prose */
+  .prose { padding: 22px 26px 60px; overflow: auto; flex: 1; min-height: 0; font-family: var(--mono); font-size: 13.5px; line-height: 1.7; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+  .prose h1 { font-size: 22px; margin: 0 0 14px; letter-spacing: -.01em; line-height: 1.3; }
+  .prose h2 { font-size: 16px; margin: 30px 0 10px; padding-top: 6px; color: var(--fg); }
+  .prose h3 { font-size: 14px; margin: 22px 0 8px; color: var(--acc); }
+  .prose p, .prose ul, .prose ol { margin: 0 0 12px; color: #cfcfd6; }
+  .prose li { margin: 3px 0; }
+  .prose code { background: rgba(255,255,255,.06); border-radius: 4px; padding: 1px 5px; font-size: .94em; color: #e9e9ef; }
+  .prose pre { position: relative; margin: 0 0 14px; padding: 12px 14px; background: #0a0a0d; border: 1px solid var(--line); border-radius: 9px; overflow: auto; font-size: 12.5px; line-height: 1.6; }
+  .prose pre code { background: none; padding: 0; color: #d7d7de; }
+  .prose pre .try {
+    position: absolute; top: 7px; right: 7px; height: 24px; padding: 0 9px; font-size: 11px;
+    border: 1px solid var(--line2); border-radius: 6px; background: var(--panel2); color: var(--dim); cursor: pointer; opacity: .7;
+  }
+  .prose pre:hover .try { opacity: 1; } .prose pre .try:hover { color: var(--acc); border-color: var(--acc); }
+  .prose table { border-collapse: collapse; margin: 0 0 14px; font-size: 12.5px; display: block; overflow-x: auto; }
+  .prose th, .prose td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+  .prose th { color: var(--fg); background: rgba(255,255,255,.03); }
+  .prose blockquote { margin: 0 0 12px; padding: 8px 14px; border-left: 2px solid var(--acc); color: var(--dim); background: rgba(212,255,58,.04); }
+  .prose .note { border: 1px solid var(--line2); background: rgba(125, 211, 252, .05); border-radius: 9px; padding: 10px 14px; color: #c9d7e2; margin: 0 0 14px; font-size: 12.5px; }
+  .lesson-nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 26px; }
+  .lesson-list { list-style: none; padding: 0; margin: 0 0 18px; counter-reset: l; }
+  .lesson-list li { counter-increment: l; }
+  .lesson-list a { display: flex; gap: 10px; padding: 7px 10px; border-radius: 7px; color: #cfcfd6; }
+  .lesson-list a::before { content: counter(l, decimal-leading-zero); color: var(--faint); }
+  .lesson-list a:hover { background: rgba(255,255,255,.04); text-decoration: none; }
+  .lesson-list a[aria-current="page"] { background: rgba(212,255,58,.08); color: var(--acc); }
+
+  /* docs view */
+  #docs { display: none; height: 100%; grid-template-columns: 240px minmax(0, 1fr); }
+  body.view-docs #docs { display: grid; }
+  .doc-side { border-right: 1px solid var(--line); padding: 18px 12px; overflow: auto; font-size: 12.5px; }
+  .doc-side h4 { margin: 4px 8px 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .doc-side a { display: block; padding: 6px 8px; border-radius: 6px; color: var(--dim); }
+  .doc-side a:hover { color: var(--fg); background: rgba(255,255,255,.04); text-decoration: none; }
+  .doc-side a[aria-current="page"] { color: var(--acc); background: rgba(212,255,58,.07); }
+  .doc-side .src { margin-top: 18px; padding: 0 8px; color: var(--faint); font-size: 11.5px; line-height: 1.6; }
+  .doc-side .src a { display: inline; padding: 0; color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+  #doc { max-width: 880px; padding: 28px 40px 80px; }
+
+  /* toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); z-index: 60; opacity: 0; pointer-events: none;
+    background: #15151b; border: 1px solid var(--line2); border-radius: 10px; padding: 10px 14px; font-size: 12.5px;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,.8); transition: opacity .25s, transform .3s var(--ease); max-width: calc(100vw - 32px);
+  }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #toast code { color: var(--acc); user-select: all; }
+
+  /* install dialog */
+  dialog {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line2); border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px));
+    box-shadow: 0 40px 120px -30px rgba(0,0,0,.9);
+  }
+  dialog::backdrop { background: rgba(4, 4, 6, .6); backdrop-filter: blur(3px); }
+  .dlg { padding: 22px 22px 18px; }
+  .dlg h2 { margin: 0 0 6px; font-size: 17px; }
+  .dlg p { margin: 0 0 14px; color: var(--dim); font-size: 12.5px; }
+  .os-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .os-tabs button { border: 1px solid var(--line2); background: none; color: var(--dim); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  .os-tabs button[aria-pressed="true"] { color: var(--bg); background: var(--acc); border-color: var(--acc); }
+  .cmdline { display: flex; align-items: center; gap: 10px; background: #0a0a0d; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 12.5px; }
+  .cmdline code { flex: 1; white-space: pre-wrap; word-break: break-all; color: var(--acc); }
+  .dlg .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+
+  /* ---------- small screens ---------- */
+  @media (max-width: 1100px) {
+    body.view-learn .work { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "lesson lesson" "editor side"; grid-template-rows: minmax(0, .8fr) minmax(0, 1.2fr); }
+  }
+  @media (max-width: 860px) {
+    :root { --head: 52px; }
+    main { height: auto; }
+    .work, body.view-learn .work { grid-template-columns: minmax(0, 1fr); grid-template-areas: "lesson" "editor" "side"; grid-template-rows: none; height: auto; }
+    body.view-learn #lesson { max-height: 70vh; }
+    .editor { height: 62vh; }
+    .side { grid-template-rows: 52vh 46vh; }
+    nav.tabs { margin-left: 0; }
+    .brand small, .hide-sm { display: none; }
+    header { gap: 10px; padding: 0 12px; }
+    #docs, body.view-docs #docs { grid-template-columns: minmax(0, 1fr); }
+    .doc-side { border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 2px; padding: 10px; }
+    .doc-side h4, .doc-side .src { display: none; }
+    #doc { padding: 20px 16px 60px; }
+    .prose { padding: 18px 16px 40px; }
+  }
+  @media (max-width: 520px) {
+    nav.tabs a { padding: 6px 7px; font-size: 12px; }
+    .head-right .btn:not(.acc) { display: none; }
+  }
 </style>
 </head>
-<body>Flywheel</body>
+<body class="view-play">
+<img id="mark" src="logo.png" alt="" width="2000" height="2000">
+
+<header class="ui" style="--d:0">
+  <a class="brand" href="#/" aria-label="Flywheel home">
+    <span class="mark-slot" id="markSlot"><img id="markDock" src="logo.png" alt="" width="2000" height="2000"></span>
+    flywheel <small>v2.3 beta</small>
+  </a>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#/" data-view="play">Playground</a>
+    <a href="#/learn" data-view="learn">Learn</a>
+    <a href="#/docs" data-view="docs">Docs</a>
+  </nav>
+  <div class="head-right">
+    <a class="btn ghost hide-sm" href="https://github.com/fwlang/flywheel" target="_blank" rel="noopener">GitHub ↗</a>
+    <a class="btn ghost hide-sm" id="back" href="https://polymorphia.dev/#main">polymorphia</a>
+    <button class="btn acc" id="installBtn" type="button" title="Install Flywheel">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M3 13h10"/></svg>
+      Install
+    </button>
+  </div>
+</header>
+
+<main>
+  <div class="work">
+    <section class="pane ui" id="lesson" aria-label="Lesson">
+      <div class="pane-bar"><span class="title" id="lessonTitle">Learn</span><span class="grow"></span><span id="lessonStep"></span></div>
+      <div class="prose" id="lessonBody"></div>
+    </section>
+
+    <section class="pane editor ui" aria-label="Editor">
+      <div class="pane-bar">
+        <span class="title" id="fileName">main.fw</span>
+        <select id="examples" aria-label="Load an example"></select>
+        <span class="grow"></span>
+        <button class="btn ghost hide-sm" id="shareBtn" type="button" title="Copy a link to this program">Share</button>
+        <button class="btn acc" id="runBtn" type="button" title="Run (Ctrl+Enter)">▶ Run <kbd style="color:#3b4710;border-color:#9fbf2c">⌃⏎</kbd></button>
+      </div>
+      <div class="ed-body" id="edBody">
+        <div class="gutter" id="gutter" aria-hidden="true">1</div>
+        <div class="code">
+          <pre id="edHl" aria-hidden="true"></pre>
+          <textarea id="ed" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Flywheel source code" wrap="off"></textarea>
+        </div>
+      </div>
+      <div class="ed-status"><span id="edPos">Ln 1, Col 1</span><span id="edRun"></span><span style="margin-left:auto">browser playground · <a href="#/docs/playground">what runs here</a></span></div>
+    </section>
+
+    <div class="side">
+      <section class="pane ui" aria-label="App preview">
+        <div class="pane-bar">
+          <span class="title">app</span><span id="appInfo">preview</span><span class="grow"></span>
+          <button class="btn ghost" id="appOpen" type="button" title="Open the rendered page in a new tab" disabled>Open ↗</button>
+        </div>
+        <div class="app-frame" id="appFrame">
+          <div class="app-url"><span class="dots"><i></i><i></i><i></i></span><span class="u" id="appUrl">http://127.0.0.1:8000/</span></div>
+          <iframe id="preview" title="App preview" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+          <div class="app-empty">
+            <img class="mini" src="logo.png" alt="">
+            <b>No app running</b>
+            <span>Return an element at the top level, call <code>web.serve("/", page)</code>,<br>or load a <code>desktop.window</code> — it shows up here, live.</span>
+            <button class="btn" type="button" data-example="counter">Try the counter app</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane ui" aria-label="pmsh terminal">
+        <div class="pane-bar"><span class="title">pmsh</span><span id="termInfo">guest@flywheel</span><span class="grow"></span>
+          <button class="btn ghost" id="termClear" type="button" title="Clear (Ctrl+L)">clear</button></div>
+        <div class="term-body" id="tbody">
+          <div id="out" aria-live="polite"></div>
+          <div class="prompt">
+            <span class="ps1" id="ps1"></span>
+            <div class="field">
+              <div class="hl" id="hl" aria-hidden="true"></div>
+              <input id="cmd" type="text" aria-label="Command" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+            </div>
+          </div>
+          <div class="menu" id="menu" role="listbox" aria-label="Suggestions"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section id="docs" class="ui" aria-label="Documentation">
+    <nav class="doc-side" id="docSide"></nav>
+    <div class="prose" id="docScroll"><article id="doc"></article></div>
+  </section>
+</main>
+
+<dialog id="installDlg" aria-labelledby="installTitle">
+  <div class="dlg">
+    <h2 id="installTitle">Install Flywheel</h2>
+    <p>Builds the compiler from source and puts <code>flywheel</code> (and <code>fw</code>) on your PATH. Nothing is installed system-wide without asking.</p>
+    <div class="os-tabs" role="group" aria-label="Operating system">
+      <button type="button" data-os="linux" aria-pressed="false">Linux</button>
+      <button type="button" data-os="windows" aria-pressed="false">Windows</button>
+      <button type="button" data-os="macos" aria-pressed="false">macOS</button>
+    </div>
+    <div class="cmdline"><code id="installCmd"></code><button class="btn" type="button" id="copyCmd">Copy</button></div>
+    <p id="installNote" style="margin:10px 0 0"></p>
+    <div class="row">
+      <button class="btn ghost" type="button" id="installClose">Close</button>
+      <a class="btn" id="installView" href="install.sh" target="_blank" rel="noopener">View script ↗</a>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script src="js/highlight.js"></script>
+<script src="js/md.js"></script>
+<script src="js/examples.js"></script>
+<script src="js/app.js"></script>
+</body>
 </html>
