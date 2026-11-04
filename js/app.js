@@ -66,18 +66,43 @@ let angle = 0, omega = IDLE, hoverBrand = false, flight = null, leaving = null;
 const ho = window.__handoff;
 const handoffSize = () => Math.round(Math.min(innerWidth, innerHeight, 800) * .3);
 
-if (ho) {
-  angle = ho.a + ho.w * clamp((Date.now() - ho.t) / 1000, 0, 1.5);
-  omega = ho.w || 240;
-  const S = ho.s || handoffSize();
+// Embedded in polymorphia.dev for the first stage of the hand-off (see index.html): wait for its
+// "go", then report the flight so it can play the matching sound, and say when everything has
+// settled so it can navigate here for real.
+const embed = window.__embed, resume = window.__resume;
+let relay = null;
+const tell = m => { if (embed) parent.postMessage(m, embed); };
+function arrive(h) {
+  angle = h.a + h.w * clamp((Date.now() - h.t) / 1000, 0, 1.5);
+  omega = h.w || 240;
+  const S = h.s || handoffSize();
   flight = { t: -0.12, S, from: null };
   mark.style.width = mark.style.height = S + "px";
   placeMark(innerWidth / 2, innerHeight / 2, 1);
   dock.style.visibility = "hidden";
   // reveal the interface around the travelling logo
   const uis = $$(".ui");
-  uis.forEach((el, i) => setTimeout(() => el.classList.add("in"), 260 + i * 70));
-  setTimeout(() => document.documentElement.classList.remove("arrive"), 260 + uis.length * 70 + 800);
+  uis.forEach((el, i) => setTimeout(() => { el.classList.add("in"); tell({ type: "fw-ui", i, n: uis.length }); }, 260 + i * 70));
+  setTimeout(() => {
+    document.documentElement.classList.remove("arrive");
+    tell({ type: "fw-settled", a: +(angle % 360).toFixed(2), w: +omega.toFixed(1), t: Date.now() });
+  }, 260 + uis.length * 70 + 800);
+}
+if (ho) arrive(ho);
+else if (resume) {
+  // the real page after the iframe stage: carry on from the iframe's last frame
+  angle = resume.a + resume.w * clamp((Date.now() - resume.t) / 1000, 0, 1);
+  omega = resume.w || IDLE;
+}
+if (embed) {
+  addEventListener("message", e => {
+    if (e.origin !== embed || !e.data || e.data.type !== "pm-go" || relay) return;
+    relay = { live: false };
+    document.documentElement.classList.remove("embed-wait");
+    arrive(e.data);
+  });
+  // ready once the logo and the fonts can paint on the first frame
+  Promise.all([document.fonts.ready, mark.decode ? mark.decode().catch(() => {}) : null]).then(() => tell({ type: "fw-ready" }));
 }
 function placeMark(cx, cy, scale) {
   const S = parseFloat(mark.style.width) || 1;
@@ -95,7 +120,12 @@ function spin(now) {
     const k = eio(clamp(flight.t));
     const tx = r.left + r.width / 2, ty = r.top + r.height / 2;
     placeMark(lerp(innerWidth / 2, tx, k), lerp(innerHeight / 2, ty, k), lerp(1, r.width / flight.S, k));
-    if (flight.t >= 1) { flight = null; mark.style.display = "none"; dock.style.visibility = ""; }
+    if (relay) {
+      tell({ type: "fw-tick", k, w: omega });
+      // our logo is on screen where polymorphia.dev's is: it can hide its own once this frame paints
+      if (!relay.live) { relay.live = true; requestAnimationFrame(() => requestAnimationFrame(() => tell({ type: "fw-live" }))); }
+    }
+    if (flight.t >= 1) { flight = null; mark.style.display = "none"; dock.style.visibility = ""; tell({ type: "fw-docked" }); }
   }
   if (leaving) {
     leaving.t = Math.min(1, leaving.t + dt / .8);
@@ -388,7 +418,7 @@ const term = (() => {
           line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, fmt, doc and lsp — </span><a href="#" data-install>install it</a>`);
           return;
         }
-        if (sub === "--version" || sub === "version") return text("flywheel 2.3 (beta-3) — browser playground");
+        if (sub === "--version" || sub === "version") return text("flywheel 2.3 (beta-3) — flywheel.js, in your browser");
         if (sub === "repl") return startRepl();
         if (sub === "run" || sub === "check") {
           let code = ed.value;

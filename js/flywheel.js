@@ -1,7 +1,8 @@
-/* Flywheel playground runtime.
+/* flywheel.js — the Flywheel language in JavaScript.
+ * https://github.com/fwlang/flywheel.js · MIT licence
  *
  * The real Flywheel compiler (github.com/fwlang/flywheel) is C++ on LLVM and produces native
- * executables, so it cannot run in a browser. This file is a tree-walking interpreter for the
+ * executables, so it cannot run in a browser. flywheel.js is a tree-walking interpreter for the
  * language that mirrors the compiler's semantics and output formatting closely enough for
  * learning and prototyping: classes, interfaces, inheritance, enums with data, exhaustive-style
  * match, generics (erased), nullable values, closures, format specs, collections, Results,
@@ -9,7 +10,8 @@
  *
  * Static typing is not checked here; programs that the compiler would reject may still run.
  *
- * Works in a window or a Web Worker: exposes `Flywheel` on the global object.
+ * Works in a window, a Web Worker or Node: exposes `Flywheel` on the global object and as the
+ * CommonJS export.
  */
 (function (root) {
 "use strict";
@@ -1165,8 +1167,8 @@ class Interp {
       if (e instanceof FwThrow) { this.errOut(`Flywheel runtime error: ${this.describeError(e.value)}${this.line ? ` (line ${this.line})` : ""}`); return { status: 1, error: e.value }; }
       if (e instanceof ExitSig) return { status: e.code, value: null };
       if (e instanceof RangeError && /call stack/i.test(e.message)) { this.errOut("Flywheel runtime error: stack overflow"); return { status: 1 }; }
-      if (e instanceof StepLimit) { this.errOut("Flywheel runtime error: time limit exceeded (the playground stops programs that run too long)"); return { status: 1 }; }
-      this.errOut(`playground internal error: ${e && e.message || e}${this.line ? ` (line ${this.line})` : ""}`);
+      if (e instanceof StepLimit) { this.errOut("Flywheel runtime error: time limit exceeded (flywheel.js stops programs that run too long)"); return { status: 1 }; }
+      this.errOut(`flywheel.js internal error: ${e && e.message || e}${this.line ? ` (line ${this.line})` : ""}`);
       if (typeof console !== "undefined") console.error(e);
       return { status: 1 };
     }
@@ -1184,7 +1186,7 @@ class Interp {
       if (e instanceof StepLimit) return "Flywheel runtime error: time limit exceeded";
       if (e instanceof ExitSig) return null;
       if (e instanceof RangeError) return "Flywheel runtime error: stack overflow";
-      return `playground internal error: ${e && e.message || e}`;
+      return `flywheel.js internal error: ${e && e.message || e}`;
     }
   }
 
@@ -1243,7 +1245,7 @@ class Interp {
     const mod = this.modules[root];
     if (!mod) {
       const native = ["fs", "io", "os", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
-      if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in the browser playground; install Flywheel to use it`));
+      if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in flywheel.js; install Flywheel to use it`));
       throw new FwThrow(new FwError("RuntimeError", `unknown module '${st.path}'`));
     }
     if (st.wildcard && (root === "html" || root === "svg")) { scope.def(root, mod); return; }    // tag sets
@@ -1723,7 +1725,7 @@ class Interp {
       case "..": case "..<": {
         if (typeof a !== "bigint" || typeof b !== "bigint") fail("CastError", "range endpoints must be int");
         const end = op === ".." ? b : b - 1n;
-        if (end - a > 10000000n) fail("NumericError", "range too large for the playground");
+        if (end - a > 10000000n) fail("NumericError", "range too large for flywheel.js");
         const items = [];
         for (let i = a; i <= end; i++) items.push(i);
         return new Tuple(items);
@@ -1893,7 +1895,7 @@ class Interp {
     }
     if (obj instanceof Module) {
       if (obj.members.has(name)) return obj.members.get(name);
-      fail("RuntimeError", `module ${obj.name} has no member '${name}'${obj.name === "web" || obj.name === "desktop" ? " in the playground" : ""}`);
+      fail("RuntimeError", `module ${obj.name} has no member '${name}'${obj.name === "web" || obj.name === "desktop" ? " in flywheel.js" : ""}`);
     }
     if (obj instanceof FwEnum) {
       const mem = obj.byName.get(name);
@@ -2569,7 +2571,7 @@ Interp.prototype.methodOf = function (v, name) {
     load: ([t]) => { v.tree = t; I.onWindow && I.onWindow(v); return null; },
     run: () => { I.onWindow && I.onWindow(v); I.windows.includes(v) || I.windows.push(v); return null; },
     set_title: ([t]) => { v.title = t; I.onWindow && I.onWindow(v); return null; },
-    eval: () => null, bind: () => fail("DesktopError", "JavaScript bindings are not available in the playground"),
+    eval: () => null, bind: () => fail("DesktopError", "JavaScript bindings are not available in flywheel.js"),
     close: () => null,
   }[name]);
   return null;
@@ -2689,10 +2691,10 @@ function makeModules(I) {
     text: ([b, s]) => response(str(I, b), s, "text/plain; charset=utf-8"),
     json: ([b, s]) => response(b instanceof JsonVal ? JSON.stringify(b.v) : str(I, b), s, "application/json"),
     redirect: ([u, s]) => response("", s === undefined ? 302n : s, "text/plain"),
-    wait: () => null, workers: () => null, static: () => fail("NetworkError", "web.static is not available in the playground"),
-    get: () => fail("HttpError", "network requests are not available in the playground"),
-    post: () => fail("HttpError", "network requests are not available in the playground"),
-    fetch: () => fail("HttpError", "network requests are not available in the playground"),
+    wait: () => null, workers: () => null, static: () => fail("NetworkError", "web.static is not available in flywheel.js"),
+    get: () => fail("HttpError", "network requests are not available in flywheel.js"),
+    post: () => fail("HttpError", "network requests are not available in flywheel.js"),
+    fetch: () => fail("HttpError", "network requests are not available in flywheel.js"),
   });
   const RESPONSE = new FwClass("web.response");
   RESPONSE.ownFields = ["status", "body", "headers"].map(name => ({ name }));
@@ -2795,7 +2797,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.3 (beta-3) playground" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.3 (beta-3) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

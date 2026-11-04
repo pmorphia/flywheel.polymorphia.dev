@@ -1,7 +1,8 @@
 /* Runs Flywheel programs off the main thread, so a runaway loop can be stopped by terminating
  * the worker. The interpreter stays alive after a run so event handlers in the app preview can
- * call back into the program (as in `flywheel desktop`); the app re-renders after each event. */
-importScripts("fw.js");
+ * call back into the program (as in `flywheel desktop`); the app re-renders after each event.
+ * flywheel.js is a copy of github.com/fwlang/flywheel.js; update it from there. */
+importScripts("flywheel.js");
 
 let I = null, appRoot = null, handlers = [], session = null, buffer = [], runId = 0;
 
@@ -40,7 +41,7 @@ onmessage = e => {
     appRoot = null; handlers = [];
     let r;
     try { r = Flywheel.run(m.code, { print, error, name: "main.fw", stdin: m.stdin }); }
-    catch (err) { error("playground internal error: " + (err && err.message || err)); r = { status: 1 }; }
+    catch (err) { error("flywheel.js internal error: " + (err && err.message || err)); r = { status: 1 }; }
     I = r.interp || null;
     if (r.value instanceof Flywheel.FwElement) appRoot = r.value;
     const ms = performance.now() - t0;
@@ -68,7 +69,7 @@ onmessage = e => {
   } else if (m.type === "repl") {
     runId = m.id;
     if (!session) session = new Flywheel.Session({ print, error });
-    try { session.exec(m.code); } catch (err) { error("playground internal error: " + (err && err.message || err)); }
+    try { session.exec(m.code); } catch (err) { error("flywheel.js internal error: " + (err && err.message || err)); }
     flush();
     postMessage({ type: "done", id: m.id, status: 0, repl: true });
   } else if (m.type === "repl-reset") session = null;

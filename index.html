@@ -10,15 +10,27 @@
 <link rel="icon" href="logo.png">
 <link rel="preload" href="logo.png" as="image">
 <script>
-  // Arriving from polymorphia.dev: the logo is already on screen there, centred at the hand-off
-  // size. Read that state before first paint so this page's first frame matches it exactly.
+  // The hand-off from polymorphia.dev runs in two stages, so that it can play sound the whole way
+  // (audio needs a click on the page that plays it, and that click happened on polymorphia.dev):
+  //   1. polymorphia.dev loads this page in a full-screen iframe (#embed=pm) and, once its logo has
+  //      glided to the centre, tells it to start the arrival flight. This page reports the flight
+  //      back so polymorphia.dev can drive the audio.
+  //   2. When the interface has settled, polymorphia.dev navigates here for real (#from=pm-settled)
+  //      and this page opens straight into the settled state, matching the iframe's last frame.
+  // #from=pm is the older one-step hand-off without sound, still used as a fallback.
   (function () {
-    var h = new URLSearchParams(location.hash.slice(1));
-    if (h.get("from") === "pm" && Math.abs(Date.now() - +h.get("t")) < 4000) {
+    var h = new URLSearchParams(location.hash.slice(1)), fresh = Math.abs(Date.now() - +h.get("t")) < 4000;
+    var de = document.documentElement;
+    if (h.get("from") === "pm" && fresh) {
       window.__handoff = { a: +h.get("a") || 0, w: +h.get("w") || 0, s: +h.get("s") || 0, t: +h.get("t") };
-      document.documentElement.classList.add("arrive");
+      de.classList.add("arrive");
+    } else if (h.get("from") === "pm-settled" && fresh) {
+      window.__resume = { a: +h.get("a") || 0, w: +h.get("w") || 0, t: +h.get("t") };
+    } else if (h.get("embed") === "pm" && window.parent !== window) {
+      window.__embed = "https://polymorphia.dev";
+      de.classList.add("arrive", "embed-wait");
     }
-    if (h.get("from")) history.replaceState(null, "", location.pathname + location.search);
+    if (h.get("from") || h.get("embed")) history.replaceState(null, "", location.pathname + location.search);
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -67,6 +79,8 @@
     transform-origin: 50% 50%; will-change: transform; display: none;
   }
   .arrive #mark { display: block; }
+  .embed-wait #mark { visibility: hidden; }
+  .embed-wait body { overflow: hidden; }
   .ui { transition: opacity .6s var(--ease), transform .7s var(--ease); }
   .arrive .ui { opacity: 0; transform: translateY(10px); }
   .arrive .ui.in { opacity: 1; transform: none; }
@@ -341,7 +355,7 @@
           <textarea id="ed" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Flywheel source code" wrap="off"></textarea>
         </div>
       </div>
-      <div class="ed-status"><span id="edPos">Ln 1, Col 1</span><span id="edRun"></span><span style="margin-left:auto">browser playground · <a href="#/docs/playground">what runs here</a></span></div>
+      <div class="ed-status"><span id="edPos">Ln 1, Col 1</span><span id="edRun"></span><span style="margin-left:auto"><a href="https://github.com/fwlang/flywheel.js" target="_blank" rel="noopener">flywheel.js</a> · <a href="#/docs/playground">what runs here</a></span></div>
     </section>
 
     <div class="side">
