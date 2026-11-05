@@ -1,41 +1,41 @@
 <#
 .SYNOPSIS
-    Turbine installer for Windows: builds and installs Turbine, the bytecode VM that runs
-    Flywheel programs without LLVM.
+    Flywheel Lite installer for Windows: builds and installs Flywheel Lite (flywheel-lite, with the
+    short alias fwl), the bytecode VM that runs Flywheel programs without LLVM.
 
 .DESCRIPTION
     Run from PowerShell (no administrator rights needed):
 
-        irm https://flywheel.polymorphia.dev/turbine-install.ps1 | iex
+        irm https://flywheel.polymorphia.dev/lite-install.ps1 | iex
 
     With options:
 
-        & ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/turbine-install.ps1))) -Yes
+        & ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/lite-install.ps1))) -Yes
 
     What it sets up:
       - A C compiler: the Visual Studio C++ tools if installed, otherwise MinGW gcc if it is on
         PATH, otherwise Visual Studio 2022 Build Tools through winget (after asking; Windows
         shows its own elevation prompt).
-      - Turbine in %LOCALAPPDATA%\Programs\Turbine, added to your user PATH.
+      - Flywheel Lite in %LOCALAPPDATA%\Programs\Flywheel Lite, added to your user PATH.
 
-    Turbine needs nothing else: no LLVM, no CMake, and nothing at run time.
+    Flywheel Lite needs nothing else: no LLVM, no CMake, and nothing at run time.
 
 .EXAMPLE
-    .\turbine-install.ps1 -Yes
+    .\lite-install.ps1 -Yes
 .EXAMPLE
-    .\turbine-install.ps1 -Ref v0.1.0 -Prefix D:\Tools\Turbine
+    .\lite-install.ps1 -Ref v0.1.0 -Prefix D:\Tools\FlywheelLite
 .EXAMPLE
-    .\turbine-install.ps1 -Uninstall
+    .\lite-install.ps1 -Uninstall
 #>
 [CmdletBinding()]
 param(
     # Installation directory.
-    [string]$Prefix = $(if ($env:TURBINE_PREFIX) { $env:TURBINE_PREFIX } else { Join-Path $env:LOCALAPPDATA 'Programs\Turbine' }),
-    # Turbine branch, tag, or commit to build.
+    [string]$Prefix = $(if ($env:LITE_PREFIX) { $env:LITE_PREFIX } else { Join-Path $env:LOCALAPPDATA 'Programs\Flywheel Lite' }),
+    # Flywheel Lite branch, tag, or commit to build.
     [string]$Ref = 'main',
     # Flywheel branch, tag, or commit whose library modules are embedded.
     [string]$FlywheelRef = 'main',
-    # Build Turbine from a local checkout instead of downloading.
+    # Build Flywheel Lite from a local checkout instead of downloading.
     [string]$Source,
     # Take the library modules from a local Flywheel checkout (default with -Source: its parent).
     [string]$FlywheelSource,
@@ -46,13 +46,13 @@ param(
     [switch]$Yes,
     # Do not install tools; fail if something is missing.
     [switch]$NoDeps,
-    # Do not add Turbine to the user PATH.
+    # Do not add Flywheel Lite to the user PATH.
     [switch]$NoModifyPath,
     # Keep the build directory.
     [switch]$KeepBuild,
     # Print what would be done without changing anything.
     [switch]$DryRun,
-    # Remove Turbine.
+    # Remove Flywheel Lite.
     [switch]$Uninstall,
     # Show help.
     [switch]$Help
@@ -63,7 +63,7 @@ param(
 # runs, so a partially downloaded copy does nothing.
 & {
 
-$TurbineRepo = 'https://github.com/fwlang/turbine'
+$LiteRepo = 'https://github.com/fwlang/flywheel-lite'
 $FlywheelRepo = 'https://github.com/fwlang/flywheel'
 # Used when CMakeLists.txt does not list them (it is the source of truth).
 $DefaultModules = @('csv', 'url', 'log', 'args', 'bigint', 'decimal')
@@ -77,7 +77,7 @@ Set-StrictMode -Version 2.0
 # --- Output and prompts ------------------------------------------------------------------------
 
 # Overall progress: Main sets Total to the number of steps it will run; each step advances the
-# bar. The same bar is drawn by turbine-install.sh.
+# bar. The same bar is drawn by lite-install.sh.
 $Progress = @{ Done = 0; Total = 0 }
 $BarWidth = 24
 
@@ -101,7 +101,7 @@ function Write-Info([string]$Text) { Write-Host "    $Text" }
 function Write-Ok([string]$Text) { Write-Host '    ' -NoNewline; Write-Host 'OK ' -ForegroundColor Green -NoNewline; Write-Host $Text }
 function Write-Warn([string]$Text) { Write-Host 'warning: ' -ForegroundColor Yellow -NoNewline; Write-Host $Text }
 
-$ErrorMarker = 'turbine-install: '
+$ErrorMarker = 'lite-install: '
 function Stop-Install([string]$Text) { throw "$ErrorMarker$Text" }
 
 function Test-Interactive {
@@ -147,7 +147,7 @@ function Test-Command([string]$Name) { return [bool](Get-Command $Name -ErrorAct
 # --- Downloads ---------------------------------------------------------------------------------
 
 function New-WorkDirectory {
-    $path = Join-Path ([IO.Path]::GetTempPath()) ("turbine-install-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+    $path = Join-Path ([IO.Path]::GetTempPath()) ("lite-install-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $path | Out-Null
     return $path
 }
@@ -268,36 +268,36 @@ function Install-BuildTools {
     return 'MSVC'
 }
 
-# --- Turbine -----------------------------------------------------------------------------------
+# --- Flywheel Lite -----------------------------------------------------------------------------------
 
 # The library modules to embed, as CMakeLists.txt lists them.
 function Get-LibraryModules([string]$Src) {
     $cmake = Join-Path $Src 'CMakeLists.txt'
     if (-not $DryRun -and (Test-Path $cmake)) {
-        $match = Select-String -Path $cmake -Pattern '^\s*set\(TURBINE_LIBRARY_MODULES\s+([^)]+)\)' | Select-Object -First 1
+        $match = Select-String -Path $cmake -Pattern '^\s*set\(LITE_LIBRARY_MODULES\s+([^)]+)\)' | Select-Object -First 1
         if ($match) { return @($match.Matches[0].Groups[1].Value.Trim() -split '\s+') }
     }
     return $DefaultModules
 }
 
-function Install-Turbine([string]$Toolchain) {
-    $src = if ($Source) { $Source } else { Join-Path $Work 'turbine' }
+function Install-Lite([string]$Toolchain) {
+    $src = if ($Source) { $Source } else { Join-Path $Work 'flywheel-lite' }
     $flywheel = if ($FlywheelSource) { $FlywheelSource } else { Join-Path $Work 'flywheel' }
     if (-not $Source -or -not $FlywheelSource) {
-        Write-Step 'Downloading Turbine'
-        if (-not $Source) { Get-Source $TurbineRepo $Ref $src }
+        Write-Step 'Downloading Flywheel Lite'
+        if (-not $Source) { Get-Source $LiteRepo $Ref $src }
         # The library modules written in Flywheel (csv, url, ...) are embedded at build time.
         if (-not $FlywheelSource) { Get-Source $FlywheelRepo $FlywheelRef $flywheel }
     }
 
-    Write-Step 'Building Turbine'
+    Write-Step 'Building Flywheel Lite'
     # The build directory is outside the source tree, so a local checkout is left untouched.
     $build = Join-Path $Work 'build'
     $objects = Join-Path $build 'obj'
     if (-not $DryRun) { New-Item -ItemType Directory -Path $objects -Force | Out-Null }
     $embed = Join-Path $build 'embed.exe'
     $embedded = Join-Path $build 'stdlib_embed.c'
-    $exe = Join-Path $build 'turbine.exe'
+    $exe = Join-Path $build 'flywheel-lite.exe'
     $stdlib = Join-Path $flywheel 'stdlib\fw'
     $modules = @(Get-LibraryModules $src | ForEach-Object { "$_=$(Join-Path $stdlib "$_.fw")" })
     $sources = if ($DryRun) { @((Join-Path $src 'src\*.c')) } else { @(Get-ChildItem (Join-Path $src 'src') -Filter '*.c' | ForEach-Object { $_.FullName }) }
@@ -309,7 +309,7 @@ function Install-Turbine([string]$Toolchain) {
         # explicit /Fo:dir\ breaks when Windows PowerShell quotes a path with spaces).
         Push-Location -Path $(if ($DryRun) { $PWD } else { $objects })
         try {
-            # /MT links the C runtime statically, so turbine.exe needs no Visual C++ redistributable.
+            # /MT links the C runtime statically, so flywheel-lite.exe needs no Visual C++ redistributable.
             Invoke-Native cl @('/nologo', '/O1', '/MT', '/D_CRT_SECURE_NO_WARNINGS', "/Fe:$embed", $embedSource) -Quiet
             Invoke-Native $embed (@($embedded) + $modules)
             Invoke-Native cl (@('/nologo', '/std:c11', '/O2', '/MT', '/W3', '/utf-8', '/DNDEBUG', '/D_CRT_SECURE_NO_WARNINGS',
@@ -323,28 +323,53 @@ function Install-Turbine([string]$Toolchain) {
     }
     if (-not $DryRun) { Write-Ok "built $exe" }
 
-    Write-Step "Installing Turbine into $Prefix"
+    Write-Step "Installing Flywheel Lite into $Prefix"
     $bin = Join-Path $Prefix 'bin'
-    $target = Join-Path $bin 'turbine.exe'
+    $target = Join-Path $bin 'flywheel-lite.exe'
     Write-Host "    `$ copy $exe $target" -ForegroundColor DarkGray
     if ($DryRun) { return }
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
-    # A running turbine.exe cannot be overwritten, but it can be renamed out of the way.
+    # A running flywheel-lite.exe cannot be overwritten, but it can be renamed out of the way.
     if (Test-Path $target) {
         $old = "$target.old"
         Remove-Item $old -Force -ErrorAction SilentlyContinue
-        try { Move-Item $target $old -Force } catch { Stop-Install "cannot replace $target (is turbine running?)" }
+        try { Move-Item $target $old -Force } catch { Stop-Install "cannot replace $target (is flywheel-lite running?)" }
         Remove-Item $old -Force -ErrorAction SilentlyContinue
     }
     Copy-Item $exe $target -Force
+    Install-Alias $bin $target
 
     $version = Invoke-Probe { & $target --version 2>&1 }
-    if ($LASTEXITCODE -ne 0) { Stop-Install 'the installed turbine does not run' }
+    if ($LASTEXITCODE -ne 0) { Stop-Install 'the installed flywheel-lite does not run' }
     $output = "$(Invoke-Probe { & $target -s 'print 6 * 7' 2>&1 })".Trim()
-    if ($LASTEXITCODE -ne 0 -or $output -ne '42') { Stop-Install "the installed turbine printed '$output' for 'print 6 * 7' instead of 42" }
+    if ($LASTEXITCODE -ne 0 -or $output -ne '42') { Stop-Install "the installed flywheel-lite printed '$output' for 'print 6 * 7' instead of 42" }
+    Invoke-Probe { & (Join-Path $bin 'fwl.exe') --version 2>&1 } | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Install 'the fwl alias does not run' }
     Write-Ok "$version"
-    $existing = Get-Command turbine -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($existing -and $existing.Source -ine $target) { Write-Warn "another turbine is on PATH ($($existing.Source)); it may shadow this one" }
+    Write-Ok 'fwl -> flywheel-lite'
+    foreach ($name in 'flywheel-lite', 'fwl') {
+        $existing = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($existing -and $existing.Source -ine (Join-Path $bin "$name.exe")) { Write-Warn "another $name is on PATH ($($existing.Source)); it may shadow this one" }
+    }
+}
+
+# fwl is a shorter name for flywheel-lite: a hard link to flywheel-lite.exe (no administrator
+# rights or Developer Mode needed, unlike a symlink), so it works from cmd, PowerShell, and
+# scripts alike. It is recreated on every install so it never points at an older build.
+function Install-Alias([string]$Bin, [string]$Target) {
+    $alias = Join-Path $Bin 'fwl.exe'
+    if (Test-Path $alias) {
+        # A running fwl.exe cannot be deleted, but it can be renamed out of the way.
+        $old = "$alias.old"
+        Remove-Item $old -Force -ErrorAction SilentlyContinue
+        try { Move-Item $alias $old -Force } catch { Stop-Install "cannot replace $alias (is fwl running?)" }
+        Remove-Item $old -Force -ErrorAction SilentlyContinue
+    }
+    try {
+        New-Item -ItemType HardLink -Path $alias -Target $Target | Out-Null
+    } catch {
+        Copy-Item $Target $alias # file systems without hard links (FAT32, exFAT)
+    }
 }
 
 # --- PATH --------------------------------------------------------------------------------------
@@ -380,35 +405,35 @@ function Remove-FromPath {
 # --- Uninstall ---------------------------------------------------------------------------------
 
 function Invoke-Uninstall {
-    Write-Step 'Uninstalling Turbine'
-    if (Test-Path (Join-Path $Prefix 'bin\turbine.exe')) {
+    Write-Step 'Uninstalling Flywheel Lite'
+    if (Test-Path (Join-Path $Prefix 'bin\flywheel-lite.exe')) {
         if (-not (Confirm-Step "Remove $Prefix?" $true)) { Stop-Install 'cancelled' }
         if (-not $DryRun) { Remove-Item -Recurse -Force $Prefix }
         Write-Ok "removed $Prefix"
     } else {
-        Write-Info "no Turbine installation in $Prefix (use -Prefix to choose another)"
+        Write-Info "no Flywheel Lite installation in $Prefix (use -Prefix to choose another)"
     }
     Remove-FromPath
     Write-Info 'Visual Studio Build Tools (if installed) were left installed.'
     Write-Host ''
-    Write-Host 'Turbine has been uninstalled.' -ForegroundColor Green
+    Write-Host 'Flywheel Lite has been uninstalled.' -ForegroundColor Green
 }
 
 # --- Main --------------------------------------------------------------------------------------
 
 function Show-Usage {
     @'
-Install Turbine (runs Flywheel programs on a bytecode VM) on Windows.
+Install Flywheel Lite (runs Flywheel programs on a bytecode VM) on Windows.
 
-  irm https://flywheel.polymorphia.dev/turbine-install.ps1 | iex
-  & ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/turbine-install.ps1))) -Yes
-  .\turbine-install.ps1 [options]
+  irm https://flywheel.polymorphia.dev/lite-install.ps1 | iex
+  & ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/lite-install.ps1))) -Yes
+  .\lite-install.ps1 [options]
 
 Where and what
-  -Prefix DIR          install directory (default: %LOCALAPPDATA%\Programs\Turbine)
-  -Ref REF             Turbine branch, tag, or commit to build (default: main)
+  -Prefix DIR          install directory (default: %LOCALAPPDATA%\Programs\Flywheel Lite)
+  -Ref REF             Flywheel Lite branch, tag, or commit to build (default: main)
   -FlywheelRef REF     Flywheel branch, tag, or commit whose library modules are embedded
-  -Source DIR          build Turbine from a local checkout
+  -Source DIR          build Flywheel Lite from a local checkout
   -FlywheelSource DIR  take the library modules from a local Flywheel checkout
                        (default with -Source: its parent directory, if it is one)
   -Compiler NAME       Auto (default: Visual Studio, else gcc on PATH), MSVC, or GCC
@@ -416,23 +441,23 @@ Where and what
 Behaviour
   -Yes                 answer yes to every question
   -NoDeps              do not install tools; fail if something is missing
-  -NoModifyPath        do not add Turbine to the user PATH
+  -NoModifyPath        do not add Flywheel Lite to the user PATH
   -KeepBuild           keep the build directory
   -DryRun              print what would be done without changing anything
-  -Uninstall           remove Turbine
+  -Uninstall           remove Flywheel Lite
   -Help                show this help
 '@ | Write-Host
 }
 
 function Main {
     if ($Help) { Show-Usage; return }
-    if ($env:OS -ne 'Windows_NT') { Stop-Install 'this installer is for Windows; on Linux and macOS use turbine-install.sh' }
+    if ($env:OS -ne 'Windows_NT') { Stop-Install 'this installer is for Windows; on Linux and macOS use lite-install.sh' }
     # Windows PowerShell 5.1 does not enable TLS 1.2 by default.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     # Locals here are visible to every function Main calls.
     $Prefix = [IO.Path]::GetFullPath($Prefix)
     $Source = Resolve-Checkout $Source 'tools\embed.c' '-Source'
-    # Turbine is normally cloned inside a Flywheel checkout.
+    # Flywheel Lite is normally cloned inside a Flywheel checkout.
     if ($Source -and -not $FlywheelSource -and (Test-Path (Join-Path $Source '..\stdlib\fw'))) {
         $FlywheelSource = [IO.Path]::GetFullPath((Join-Path $Source '..'))
     }
@@ -440,10 +465,10 @@ function Main {
 
     if ($Uninstall) { Invoke-Uninstall; return }
 
-    Write-Host 'Turbine installer' -ForegroundColor White
-    $origin = if ($Source) { $Source } else { "$TurbineRepo @ $Ref" }
+    Write-Host 'Flywheel Lite installer' -ForegroundColor White
+    $origin = if ($Source) { $Source } else { "$LiteRepo @ $Ref" }
     $library = if ($FlywheelSource) { $FlywheelSource } else { "$FlywheelRepo @ $FlywheelRef" }
-    Write-Info "Turbine:   $Prefix  ($origin)"
+    Write-Info "Lite:      $Prefix  ($origin)"
     Write-Info "Library:   $library"
     if ($DryRun) { Write-Info 'dry run: nothing will be changed' }
 
@@ -453,21 +478,21 @@ function Main {
     $environment = Save-Environment
     try {
         $toolchain = Install-BuildTools
-        Install-Turbine $toolchain
+        Install-Lite $toolchain
         Add-ToPath
     } finally {
         Restore-Environment $environment
         Remove-WorkDirectory $Work
     }
-    # Turbine works in this session too, not only in new terminals.
+    # Flywheel Lite works in this session too, not only in new terminals.
     if (-not $NoModifyPath -and -not $DryRun) { $env:Path = "$(Join-Path $Prefix 'bin');$env:Path" }
 
     Write-Host ''
     if ($DryRun) { Write-Host 'Dry run complete. Nothing was changed.' -ForegroundColor Green; return }
-    Write-Host 'Turbine is installed.' -ForegroundColor Green
+    Write-Host 'Flywheel Lite is installed.' -ForegroundColor Green
     Write-Info 'Try:'
-    Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; turbine hello.fw"
-    Write-Info '(or start an interactive session: turbine repl)'
+    Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; flywheel-lite hello.fw"
+    Write-Info '(fwl is a short alias for flywheel-lite: fwl hello.fw; fwl repl starts a session)'
 }
 
 try {

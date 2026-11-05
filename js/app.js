@@ -41,25 +41,25 @@ const INSTALL = {
     unsupported: true,
   },
 };
-// Turbine: the bytecode VM. It needs only a C compiler, so it installs quickly and runs on macOS.
-const TB_SH = "curl -fsSL https://flywheel.polymorphia.dev/turbine-install.sh | bash";
-const TURBINE_INSTALL = {
+// Flywheel Lite: the bytecode VM. It needs only a C compiler, so it installs quickly and runs on macOS.
+const LITE_SH = "curl -fsSL https://flywheel.polymorphia.dev/lite-install.sh | bash";
+const LITE_INSTALL = {
   linux: {
-    kind: "sh", label: "Linux", url: "turbine-install.sh", file: "turbine-install.sh", cmd: TB_SH,
-    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/turbine && cd turbine\nmake && make install PREFIX=~/.local",
+    kind: "sh", label: "Linux", url: "lite-install.sh", file: "lite-install.sh", cmd: LITE_SH,
+    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
     run: "in a terminal",
     note: "Needs only a C compiler and make; asks before using sudo to install them.",
   },
   windows: {
-    kind: "ps1", label: "Windows", url: "turbine-install.ps1", file: "turbine-install.ps1",
-    cmd: "irm https://flywheel.polymorphia.dev/turbine-install.ps1 | iex",
-    src: "git clone https://github.com/fwlang/flywheel; cd flywheel\ngit clone https://github.com/fwlang/turbine; cd turbine\ncmake -S . -B build\ncmake --build build --config Release",
+    kind: "ps1", label: "Windows", url: "lite-install.ps1", file: "lite-install.ps1",
+    cmd: "irm https://flywheel.polymorphia.dev/lite-install.ps1 | iex",
+    src: "git clone https://github.com/fwlang/flywheel; cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite; cd flywheel-lite\ncmake -S . -B build\ncmake --build build --config Release",
     run: "in PowerShell",
     note: "No administrator rights needed. Builds with Visual Studio's C compiler, or MinGW gcc if that is on PATH; offers to install the Build Tools if neither is found.",
   },
   macos: {
-    kind: "sh", label: "macOS", url: "turbine-install.sh", file: "turbine-install.sh", cmd: TB_SH,
-    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/turbine && cd turbine\nmake && make install PREFIX=~/.local",
+    kind: "sh", label: "macOS", url: "lite-install.sh", file: "lite-install.sh", cmd: LITE_SH,
+    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
     run: "in Terminal",
     note: "Builds with Apple's Command Line Tools (clang and make) and offers to install them if they are missing.",
   },
@@ -503,17 +503,18 @@ const term = (() => {
     } },
     { name: "learn", desc: "open the lessons", args: LESSONS.map(l => l.id), run(a) { go("#/learn" + (a[0] ? "/" + lessonId(a[0]) : "")); } },
     { name: "docs", alias: ["man"], desc: "open the documentation", args: DOCS.map(d => d.id), run(a) { go("#/docs" + (a[0] ? "/" + a[0] : "")); } },
-    { name: "install", desc: "open the install menu (flywheel / turbine / flywheel.js)", args: ["flywheel", "turbine", "js", "sh", "ps1"], run(a) {
+    { name: "install", desc: "open the install menu (flywheel / lite / flywheel.js)", args: ["flywheel", "lite", "js", "sh", "ps1"], run(a) {
+        if (a[0] === "flywheel-lite" || a[0] === "fwl") a = ["lite"];
         const os = a[0] === "ps1" ? "windows" : a[0] === "sh" ? "linux" : OS;
         const it = INSTALL[os];
         if (a[0] === "js" || a[0] === "flywheel.js") { line(`<span class="o-dim">in your browser it is already here; in Node:</span>`); line(`  <span class="o-cyan">${esc(JS_INSTALL.npx)}</span>`); }
-        else if (a[0] === "turbine") { line(`<span class="o-dim">run this ${TURBINE_INSTALL[OS].run}:</span>`); line(`  <span class="o-acc">${esc(TURBINE_INSTALL[OS].cmd)}</span>`); }
+        else if (a[0] === "lite") { line(`<span class="o-dim">run this ${LITE_INSTALL[OS].run}:</span>`); line(`  <span class="o-acc">${esc(LITE_INSTALL[OS].cmd)}</span>`); }
         else {
-          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS is not supported</span><span class="o-dim"> — Flywheel has never been tested there; it supports Linux and Windows. turbine and flywheel.js work on a Mac (install turbine).</span>`);
+          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS is not supported</span><span class="o-dim"> — Flywheel has never been tested there; it supports Linux and Windows. flywheel lite and flywheel.js work on a Mac (install lite).</span>`);
           line(`<span class="o-dim">run this ${it.run}:</span>`);
           line(`  <span class="o-acc">${esc(it.cmd)}</span>`);
         }
-        openInstall(undefined, a[0] === "turbine" ? "turbine" : a[0] === "js" || a[0] === "flywheel.js" ? "js" : "flywheel");
+        openInstall(undefined, a[0] === "lite" ? "lite" : a[0] === "js" || a[0] === "flywheel.js" ? "js" : "flywheel");
     } },
     { name: "github", alias: ["gh"], desc: "Flywheel on GitHub", args: ["flywheel", "pulley", "vscode-flywheel"], run(a) {
         open("https://github.com/fwlang/" + (a[0] || "flywheel"));
@@ -782,8 +783,8 @@ function rerenderProse() {
 /* ================================================================ install */
 const dlg = $("#installDlg"), ipanel = $("#ipanel"), idetail = $("#idetail");
 let pick = "flywheel", dlgOs = OS, closing = null;
-const THEME_NAME = { flywheel: "flywheel", turbine: "turbine", js: "flywheel.js" };
-const PICKS = ["flywheel", "turbine", "js"];
+const THEME_NAME = { flywheel: "flywheel", lite: "flywheel lite", js: "flywheel.js" };
+const PICKS = ["flywheel", "lite", "js"];
 const osTabs = table => `<div class="os-tabs" role="group" aria-label="Operating system">${Object.entries(table).map(([k, v]) => `<button type="button" data-os="${k}" aria-pressed="${k === dlgOs}">${v.label}${k === OS ? '<span class="me">you</span>' : ""}</button>`).join("")}</div>`;
 const rawScript = it => method("Raw script", `download ${it.file}, read it, then run it yourself`,
   `<div class="irow"><a class="btn ibtn" href="${it.url}" download="${it.file}">↓ Download ${it.file}</a><a class="btn" href="${it.url}" target="_blank" rel="noopener">View ${it.file} ↗</a></div>
@@ -808,24 +809,24 @@ function paintInstall() {
       </div>`;
     const body = it.unsupported
       ? `<div class="unsup" role="alert"><b>macOS is not supported</b><p>Flywheel has never been built or tested on macOS, so there is no official install for it. It supports Linux and Windows.</p>
-           <div class="irow"><button class="btn ibtn" type="button" id="useTb">Use turbine instead</button><button class="btn" type="button" id="useJs">Use flywheel.js</button><span class="inote" style="margin:0">Both run on a Mac today.</span></div></div>
+           <div class="irow"><button class="btn ibtn" type="button" id="useLite">Use flywheel lite instead</button><button class="btn" type="button" id="useJs">Use flywheel.js</button><span class="inote" style="margin:0">Both run on a Mac today.</span></div></div>
          <details class="untested"><summary>Try anyway (untested, unsupported)</summary><p class="inote warn">These are the Linux installer commands. They may fail, and problems on macOS won't be fixed.</p>${methods}</details>`
       : methods + `<p class="inote">${esc(it.note)}</p>`;
     html = `<h3>Install <em>flywheel</em></h3><p>${it.unsupported ? "Native compiler: Linux and Windows only." : `Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.`}</p>
       ${osTabs(INSTALL)}
       ${body}`;
-  } else if (pick === "turbine") {
-    const it = TURBINE_INSTALL[dlgOs];
+  } else if (pick === "lite") {
+    const it = LITE_INSTALL[dlgOs];
     COPY.one = it.cmd; COPY.src = it.src;
-    html = `<h3>Install <em>turbine</em></h3><p>Run ${it.run}. It builds Turbine from source in a few seconds and adds it to your PATH; the only dependency is a C compiler.</p>
-      ${osTabs(TURBINE_INSTALL)}
+    html = `<h3>Install <em>flywheel lite</em></h3><p>Run ${it.run}. It builds Flywheel Lite from source in a few seconds and adds <code>flywheel-lite</code> and its short alias <code>fwl</code> to your PATH; the only dependency is a C compiler.</p>
+      ${osTabs(LITE_INSTALL)}
       <div class="methods">
         ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), true)}
         ${rawScript(it)}
         ${method("From source", "any C11 compiler; the build embeds library modules from a Flywheel checkout", cmdBox(it.src, "src"))}
       </div>
       <p class="inote">${esc(it.note)}</p>
-      <p class="inote">Run programs with <code>turbine hello.fw</code>, or start a session with <code>turbine repl</code>. Native executables, static type checking, networking, databases, threads and native imports need the compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;
+      <p class="inote">Run programs with <code>flywheel-lite hello.fw</code> or the short alias <code>fwl hello.fw</code>; start a session with <code>fwl repl</code>. Native executables, static type checking, networking, databases, threads and native imports need the compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;
   } else {
     COPY.tag = JS_INSTALL.tag; COPY.npx = JS_INSTALL.npx; COPY.npm = JS_INSTALL.npm;
     html = `<h3>Use <em>flywheel.js</em></h3><p>It is already running on this page. Nothing to install for the browser; one file for everything else.</p>
@@ -880,7 +881,7 @@ dlg.addEventListener("click", e => {
     return;
   }
   if (t.closest("#useJs")) { choose("js"); return; }
-  if (t.closest("#useTb")) { choose("turbine"); return; }
+  if (t.closest("#useLite")) { choose("lite"); return; }
   if (t.closest("#jsPlay")) { closeInstall(); go("#/"); return; }
   if (t.closest("#jsLearn")) { closeInstall(); }
 });
