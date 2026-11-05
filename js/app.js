@@ -37,8 +37,8 @@ const INSTALL = {
     all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
     src: 'git clone https://github.com/fwlang/flywheel && cd flywheel',
     run: "in a terminal",
-    note: "macOS isn't a supported target yet; Flywheel builds on Linux and Windows. The Linux script is shown for reference, and flywheel.js works on a Mac today.",
-    warn: true,
+    note: "",
+    unsupported: true,
   },
 };
 const JS_INSTALL = {
@@ -485,7 +485,7 @@ const term = (() => {
         const it = INSTALL[os];
         if (a[0] === "js" || a[0] === "flywheel.js") { line(`<span class="o-dim">in your browser it is already here; in Node:</span>`); line(`  <span class="o-cyan">${esc(JS_INSTALL.npx)}</span>`); }
         else {
-          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS isn't supported yet</span><span class="o-dim"> — Flywheel builds on Linux and Windows</span>`);
+          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS is not supported</span><span class="o-dim"> — Flywheel has never been tested there; it supports Linux and Windows. flywheel.js works on a Mac.</span>`);
           line(`<span class="o-dim">run this ${it.run}:</span>`);
           line(`  <span class="o-acc">${esc(it.cmd)}</span>`);
         }
@@ -771,17 +771,22 @@ function paintInstall() {
   if (pick === "flywheel") {
     const it = INSTALL[dlgOs];
     COPY.one = it.cmd; COPY.all = it.all; COPY.src = it.src.replace(/\\n/g, "\n");
-    html = `<h3>Install <em>flywheel</em></h3><p>Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.</p>
-      <div class="os-tabs" role="group" aria-label="Operating system">${Object.entries(INSTALL).map(([k, v]) => `<button type="button" data-os="${k}" aria-pressed="${k === dlgOs}">${v.label}${k === OS ? '<span class="me">you</span>' : ""}</button>`).join("")}</div>
-      <div class="methods">
-        ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), true)}
+    const methods = `<div class="methods">
+        ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), !it.unsupported)}
         ${method("Raw script", `download ${it.file}, read it, then run it yourself`,
           `<div class="irow"><a class="btn ibtn" id="dlRaw" href="${it.url}" download="${it.file}">↓ Download ${it.file}</a><a class="btn" href="${it.url}" target="_blank" rel="noopener">View ${it.file} ↗</a></div>
            <p class="inote">${it.kind === "ps1" ? "Run it with <code>powershell -ExecutionPolicy Bypass -File .\\install.ps1</code>." : "Run it with <code>bash install.sh</code> (<code>--help</code> lists the options)."}</p>`)}
         ${method("Everything", "Flywheel + Pulley (packages) + the VS Code extension", cmdBox(it.all, "all"))}
         ${method("From source", "CMake 3.24+, a C++20 compiler, LLVM 21–23", cmdBox(it.src.replace(/\\n/g, "\n"), "src"))}
-      </div>
-      <p class="inote${it.warn ? " warn" : ""}">${esc(it.note)}</p>`;
+      </div>`;
+    const body = it.unsupported
+      ? `<div class="unsup" role="alert"><b>macOS is not supported</b><p>Flywheel has never been built or tested on macOS, so there is no official install for it. It supports Linux and Windows.</p>
+           <div class="irow"><button class="btn ibtn" type="button" id="useJs">Use flywheel.js instead</button><span class="inote" style="margin:0">flywheel.js runs on a Mac today.</span></div></div>
+         <details class="untested"><summary>Try anyway (untested, unsupported)</summary><p class="inote warn">These are the Linux installer commands. They may fail, and problems on macOS won't be fixed.</p>${methods}</details>`
+      : methods + `<p class="inote">${esc(it.note)}</p>`;
+    html = `<h3>Install <em>flywheel</em></h3><p>${it.unsupported ? "Native compiler: Linux and Windows only." : `Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.`}</p>
+      <div class="os-tabs" role="group" aria-label="Operating system">${Object.entries(INSTALL).map(([k, v]) => `<button type="button" data-os="${k}" aria-pressed="${k === dlgOs}">${v.label}${k === OS ? '<span class="me">you</span>' : ""}</button>`).join("")}</div>
+      ${body}`;
   } else {
     COPY.tag = JS_INSTALL.tag; COPY.npx = JS_INSTALL.npx; COPY.npm = JS_INSTALL.npm;
     html = `<h3>Use <em>flywheel.js</em></h3><p>It is already running on this page. Nothing to install for the browser; one file for everything else.</p>
@@ -835,6 +840,7 @@ dlg.addEventListener("click", e => {
       () => getSelection().selectAllChildren(cp.previousElementSibling));
     return;
   }
+  if (t.closest("#useJs")) { choose("js"); return; }
   if (t.closest("#jsPlay")) { closeInstall(); go("#/"); return; }
   if (t.closest("#jsLearn")) { closeInstall(); }
 });
