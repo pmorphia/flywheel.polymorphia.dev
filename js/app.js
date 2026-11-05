@@ -15,9 +15,37 @@ const store = {
 const POLY = "https://polymorphia.dev";
 const EMAIL = "hello@polymorphia.dev";
 const INSTALL = {
-  linux: { kind: "sh", url: "install.sh", cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash", note: "Linux: builds with your distribution's LLVM 21–23 and CMake; asks before using sudo for packages." },
-  windows: { kind: "ps1", url: "install.ps1", cmd: "irm https://flywheel.polymorphia.dev/install.ps1 | iex", note: "Windows: run in PowerShell. No administrator rights needed; it fetches LLVM, CMake and Ninja privately." },
-  macos: { kind: "sh", url: "install.sh", cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash", note: "macOS isn't supported yet — Flywheel builds on Linux and Windows. The Linux script is shown for reference." },
+  linux: {
+    kind: "sh", label: "Linux", url: "install.sh", file: "install.sh",
+    cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash",
+    all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
+    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)"\ncmake --build build --parallel',
+    run: "in a terminal",
+    note: "Builds with your distribution's LLVM 21–23 and CMake; asks before using sudo for packages.",
+  },
+  windows: {
+    kind: "ps1", label: "Windows", url: "install.ps1", file: "install.ps1",
+    cmd: "irm https://flywheel.polymorphia.dev/install.ps1 | iex",
+    all: "& ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/install.ps1))) -All",
+    src: 'git clone https://github.com/fwlang/flywheel; cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="<path to LLVM>\\lib\\cmake\\llvm"\ncmake --build build --parallel',
+    run: "in PowerShell",
+    note: "No administrator rights needed; it fetches LLVM, CMake and Ninja privately. To build by hand use an x64 Visual Studio developer shell.",
+  },
+  macos: {
+    kind: "sh", label: "macOS", url: "install.sh", file: "install.sh",
+    cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash",
+    all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
+    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel',
+    run: "in a terminal",
+    note: "macOS isn't a supported target yet; Flywheel builds on Linux and Windows. The Linux script is shown for reference, and flywheel.js works on a Mac today.",
+    warn: true,
+  },
+};
+const JS_INSTALL = {
+  tag: '<script src="https://flywheel.polymorphia.dev/js/flywheel.js"></script>\n<script>\n  Flywheel.run(\'print "Hello from {1 + 1} worlds"\', { print: console.log });\n</script>',
+  npx: "npx github:fwlang/flywheel.js run main.fw",
+  npm: "npm install github:fwlang/flywheel.js",
+  file: "js/flywheel.js",
 };
 const platform = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "").toLowerCase();
 const OS = /win/.test(platform) ? "windows" : /mac|iphone|ipad/.test(platform) ? "macos" : "linux";
@@ -418,7 +446,7 @@ const term = (() => {
           line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, fmt, doc and lsp — </span><a href="#" data-install>install it</a>`);
           return;
         }
-        if (sub === "--version" || sub === "version") return text("flywheel 2.3 (beta-3) — flywheel.js, in your browser");
+        if (sub === "--version" || sub === "version") return text("flywheel 2.9 (beta-9) — flywheel.js, in your browser");
         if (sub === "repl") return startRepl();
         if (sub === "run" || sub === "check") {
           let code = ed.value;
@@ -452,13 +480,16 @@ const term = (() => {
     } },
     { name: "learn", desc: "open the lessons", args: LESSONS.map(l => l.id), run(a) { go("#/learn" + (a[0] ? "/" + lessonId(a[0]) : "")); } },
     { name: "docs", alias: ["man"], desc: "open the documentation", args: DOCS.map(d => d.id), run(a) { go("#/docs" + (a[0] ? "/" + a[0] : "")); } },
-    { name: "install", desc: "install Flywheel (install.sh / install.ps1)", args: ["sh", "ps1"], run(a) {
+    { name: "install", desc: "open the install menu (flywheel / flywheel.js)", args: ["flywheel", "js", "sh", "ps1"], run(a) {
         const os = a[0] === "ps1" ? "windows" : a[0] === "sh" ? "linux" : OS;
         const it = INSTALL[os];
-        if (!a[0] && OS === "macos") line(`<span class="o-err">macOS isn't supported yet</span><span class="o-dim"> — Flywheel builds on Linux and Windows</span>`);
-        line(`<span class="o-dim">run this in ${it.kind === "ps1" ? "PowerShell" : "a terminal"}:</span>`);
-        line(`  <span class="o-acc">${esc(it.cmd)}</span>`);
-        open(new URL(it.url, location.href).href);
+        if (a[0] === "js" || a[0] === "flywheel.js") { line(`<span class="o-dim">in your browser it is already here; in Node:</span>`); line(`  <span class="o-cyan">${esc(JS_INSTALL.npx)}</span>`); }
+        else {
+          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS isn't supported yet</span><span class="o-dim"> — Flywheel builds on Linux and Windows</span>`);
+          line(`<span class="o-dim">run this ${it.run}:</span>`);
+          line(`  <span class="o-acc">${esc(it.cmd)}</span>`);
+        }
+        openInstall();
     } },
     { name: "github", alias: ["gh"], desc: "Flywheel on GitHub", args: ["flywheel", "pulley", "vscode-flywheel"], run(a) {
         open("https://github.com/fwlang/" + (a[0] || "flywheel"));
@@ -528,7 +559,7 @@ const term = (() => {
   /* ---------- REPL */
   function startRepl() {
     repl = { buf: [] };
-    line(`<span class="o-vio">Flywheel 2.3 (beta-3) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
+    line(`<span class="o-vio">Flywheel 2.9 (beta-9) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
     line(`<span class="o-dim">:show lists the session, :reset clears it, :quit (or Ctrl+D) leaves</span>`);
     replLog = [];
     setPs1(); render();
@@ -725,29 +756,90 @@ function rerenderProse() {
 }
 
 /* ================================================================ install */
-const dlg = $("#installDlg");
-let dlgOs = OS;
+const dlg = $("#installDlg"), ipanel = $("#ipanel"), idetail = $("#idetail");
+let pick = "flywheel", dlgOs = OS, closing = null;
+const THEME_NAME = { flywheel: "flywheel", js: "flywheel.js" };
+const cmdBox = (cmd, id) => `<div class="cmdline"><code>${esc(cmd)}</code><button class="btn" type="button" data-copy="${esc(id)}">Copy</button></div>`;
+const COPY = {};
+const method = (title, sub, body, rec) => `<div class="method"><div class="mh"><b>${title}</b><span>${sub}</span>${rec ? '<span class="rec" style="flex:none">recommended</span>' : ""}</div>${body}</div>`;
 function paintInstall() {
-  const it = INSTALL[dlgOs];
-  $("#installCmd").textContent = it.cmd;
-  $("#installNote").textContent = it.note;
-  $("#installView").href = it.url;
-  $("#installView").textContent = `View ${it.url} ↗`;
-  $$(".os-tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.os === dlgOs));
+  ipanel.dataset.theme = pick;
+  $("#iName").textContent = THEME_NAME[pick];
+  $$(".icard").forEach(c => c.setAttribute("aria-checked", c.dataset.pick === pick));
+  Object.keys(COPY).forEach(k => delete COPY[k]);
+  let html;
+  if (pick === "flywheel") {
+    const it = INSTALL[dlgOs];
+    COPY.one = it.cmd; COPY.all = it.all; COPY.src = it.src.replace(/\\n/g, "\n");
+    html = `<h3>Install <em>flywheel</em></h3><p>Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.</p>
+      <div class="os-tabs" role="group" aria-label="Operating system">${Object.entries(INSTALL).map(([k, v]) => `<button type="button" data-os="${k}" aria-pressed="${k === dlgOs}">${v.label}${k === OS ? '<span class="me">you</span>' : ""}</button>`).join("")}</div>
+      <div class="methods">
+        ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), true)}
+        ${method("Raw script", `download ${it.file}, read it, then run it yourself`,
+          `<div class="irow"><a class="btn ibtn" id="dlRaw" href="${it.url}" download="${it.file}">↓ Download ${it.file}</a><a class="btn" href="${it.url}" target="_blank" rel="noopener">View ${it.file} ↗</a></div>
+           <p class="inote">${it.kind === "ps1" ? "Run it with <code>powershell -ExecutionPolicy Bypass -File .\\install.ps1</code>." : "Run it with <code>bash install.sh</code> (<code>--help</code> lists the options)."}</p>`)}
+        ${method("Everything", "Flywheel + Pulley (packages) + the VS Code extension", cmdBox(it.all, "all"))}
+        ${method("From source", "CMake 3.24+, a C++20 compiler, LLVM 21–23", cmdBox(it.src.replace(/\\n/g, "\n"), "src"))}
+      </div>
+      <p class="inote${it.warn ? " warn" : ""}">${esc(it.note)}</p>`;
+  } else {
+    COPY.tag = JS_INSTALL.tag; COPY.npx = JS_INSTALL.npx; COPY.npm = JS_INSTALL.npm;
+    html = `<h3>Use <em>flywheel.js</em></h3><p>It is already running on this page. Nothing to install for the browser; one file for everything else.</p>
+      <div class="methods">
+        ${method("In your browser", "this page is the playground", `<div class="irow"><button class="btn ibtn" type="button" id="jsPlay">▶ Open the playground</button><a class="btn" href="#/learn" id="jsLearn">Start the tutorial</a></div>`, true)}
+        ${method("Script tag", "add it to any web page", cmdBox(JS_INSTALL.tag, "tag"))}
+        ${method("Download the file", "dependency-free, MIT licensed", `<div class="irow"><a class="btn ibtn" href="${JS_INSTALL.file}" download="flywheel.js">↓ Download flywheel.js</a><a class="btn" href="https://github.com/fwlang/flywheel.js" target="_blank" rel="noopener">GitHub ↗</a></div>`)}
+        ${method("Node command line", "run, check, export, debug, serve, repl", cmdBox(JS_INSTALL.npx, "npx") + `<p class="inote">Or add it to a project: <code>${esc(JS_INSTALL.npm)}</code></p>`)}
+      </div>
+      <p class="inote">Static type checking, files, networking, databases and native imports need the real compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;
+  }
+  idetail.innerHTML = `<div class="iview">${html}</div>`;
 }
-function openInstall() { dlgOs = OS; paintInstall(); if (!dlg.open) dlg.showModal(); }
-$$(".os-tabs button").forEach(b => b.addEventListener("click", () => { dlgOs = b.dataset.os; paintInstall(); }));
-$("#copyCmd").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(INSTALL[dlgOs].cmd); $("#copyCmd").textContent = "Copied"; setTimeout(() => $("#copyCmd").textContent = "Copy", 1400); }
-  catch (e) { getSelection().selectAllChildren($("#installCmd")); }
+function openInstall(from) {
+  if (closing) { clearTimeout(closing); closing = null; dlg.classList.remove("out"); }
+  pick = "flywheel"; dlgOs = OS; paintInstall();
+  if (!dlg.open) dlg.showModal();
+  // the panel opens as a circle that grows out of the button that was pressed
+  const r = ipanel.getBoundingClientRect(), b = (from || $("#installBtn")).getBoundingClientRect();
+  ipanel.style.setProperty("--ox", Math.round(b.left + b.width / 2 - r.left) + "px");
+  ipanel.style.setProperty("--oy", Math.round(b.top + b.height / 2 - r.top) + "px");
+  dlg.classList.remove("in"); void dlg.offsetWidth;
+  requestAnimationFrame(() => dlg.classList.add("in"));
+}
+function closeInstall() {
+  if (!dlg.open || closing) return;
+  dlg.classList.remove("in"); dlg.classList.add("out");
+  closing = setTimeout(() => { closing = null; dlg.classList.remove("out"); dlg.close(); }, reduced ? 10 : 420);
+}
+function choose(p) {
+  if (p === pick) return;
+  pick = p; paintInstall();
+  const l = $("#iLogo"); l.classList.remove("spin"); void l.offsetWidth; l.classList.add("spin");
+}
+dlg.addEventListener("click", e => {
+  const t = e.target;
+  if (t === dlg) return closeInstall();
+  const card = t.closest(".icard"); if (card) return choose(card.dataset.pick);
+  const osb = t.closest("[data-os]"); if (osb) { dlgOs = osb.dataset.os; paintInstall(); return; }
+  const cp = t.closest("[data-copy]");
+  if (cp) {
+    const txt = COPY[cp.dataset.copy];
+    navigator.clipboard.writeText(txt).then(() => { cp.textContent = "Copied"; setTimeout(() => cp.textContent = "Copy", 1400); },
+      () => getSelection().selectAllChildren(cp.previousElementSibling));
+    return;
+  }
+  if (t.closest("#jsPlay")) { closeInstall(); go("#/"); return; }
+  if (t.closest("#jsLearn")) { closeInstall(); }
 });
-$("#installClose").addEventListener("click", () => dlg.close());
-dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
-// the Install button opens the right script for this OS and shows the one-liner to run it
-$("#installBtn").addEventListener("click", () => {
-  window.open(INSTALL[OS].url, "_blank", "noopener");
-  openInstall();
+dlg.addEventListener("cancel", e => { e.preventDefault(); closeInstall(); });
+$("#installClose").addEventListener("click", closeInstall);
+// arrow keys move between the two choices, like a radio group
+$(".ichoice").addEventListener("keydown", e => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  e.preventDefault(); const p = pick === "flywheel" ? "js" : "flywheel"; choose(p); $(`.icard[data-pick="${p}"]`).focus();
 });
+// the Install button opens the menu; nothing is downloaded until you choose to
+$("#installBtn").addEventListener("click", () => openInstall());
 
 /* ================================================================ routing */
 const tabs = $$("nav.tabs a");

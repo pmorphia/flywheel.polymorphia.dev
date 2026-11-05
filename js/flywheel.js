@@ -19,7 +19,7 @@
 /* =========================================================================================
  * errors and control signals
  * ========================================================================================= */
-class FwError { constructor(type, message) { this.type = type; this.message = message; } }
+class FwError { constructor(type, message) { this.type = type; this.message = message; } get name() { return this.type; } }
 class FwThrow { constructor(value) { this.value = value; } }          // a Flywheel exception in flight
 class CompileError extends Error {
   constructor(msg, line, col) { super(msg); this.line = line; this.col = col; }
@@ -31,7 +31,7 @@ const BREAK = new BreakSig(), CONTINUE = new ContinueSig();
 const fail = (type, msg) => { throw new FwThrow(new FwError(type, msg)); };
 const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "ProcessError", "IndexError", "KeyError",
   "NumericError", "AssertionError", "JsonError", "ResultError", "CastError", "SelectorError", "ValueError",
-  "RegexError", "NetworkError", "HttpError", "DatabaseError", "DesktopError"];
+  "RegexError", "NetworkError", "HttpError", "DatabaseError", "DesktopError", "NativeError"];
 
 /* =========================================================================================
  * lexer
@@ -75,7 +75,7 @@ function tokenize(S, start, stop) {
   const last = () => toks[toks.length - 1];
   const push = (t, v, s, e) => { toks.push({ t, v, s, e, sp: spaceBefore }); spaceBefore = false; };
   const valueEnd = tk => tk && (tk.t === "num" || tk.t === "str" || tk.t === "char" || tk.t === "markup" ||
-    (tk.t === "id" && tk.v !== "print") || (tk.t === "kw" && /^(true|false|null)$/.test(tk.v)) ||
+    tk.t === "json" || (tk.t === "id" && tk.v !== "print") || (tk.t === "kw" && /^(true|false|null)$/.test(tk.v)) ||
     (tk.t === "op" && /^[)\]}]$/.test(tk.v)));
   while (i < src.length) {
     const c = src[i];
@@ -93,6 +93,14 @@ function tokenize(S, start, stop) {
       i++; spaceBefore = true; continue;
     }
     if (stop && depth === 0 && (c === "}" || (stop === "spec" && c === ":"))) return { toks, end: i };
+    // <json>...</json>: raw JSON, checked now
+    if (c === "<" && src.startsWith("<json>", i) && !valueEnd(last())) {
+      const e = src.indexOf("</json>", i + 6);
+      if (e < 0) throw S.err("unterminated <json> literal", i);
+      let v;
+      try { v = JSON.parse(src.slice(i + 6, e)); } catch (err) { throw S.err("invalid JSON in <json> literal: " + err.message, i); }
+      push("json", v, i, e + 7); i = e + 7; continue;
+    }
     // markup
     if (c === "<" && (isTagStart(src[i + 1] || "") || src[i + 1] === ">") && !valueEnd(last())) {
       const m = lexMarkup(S, i);
@@ -317,10 +325,11 @@ class Parser {
   }
   line(tk) { return this.S.pos((tk || this.peek()).s).line; }
   eol() { return this.is("nl") || this.is("eof") || this.op(";"); }
+  eol1() { const t = this.peek(1); return t.t === "nl" || t.t === "eof" || (t.t === "op" && t.v === ";"); }
   endStmt() {
     if (this.op(";")) { this.next(); return; }
     if (this.is("nl")) { this.next(); return; }
-    if (this.is("eof") || this.kw("end") || this.kw("else") || this.kw("catch") || this.kw("finally") || this.kw("case")) return;
+    if (this.is("eof") || this.kw("end") || this.kw("else") || this.kw("catch") || this.kw("finally") || this.kw("then") || this.kw("case")) return;
     throw this.err(`expected end of statement, got ${this.desc(this.peek())}`);
   }
   withNL(n, f) { const s = this.skipNL; this.skipNL = n; try { return f(); } finally { this.skipNL = s; } }
@@ -431,7 +440,19 @@ class Parser {
         }
         case "break": this.next(); this.endStmt(); return { k: "Break" };
         case "continue": this.next(); this.endStmt(); return { k: "Continue" };
-        case "throw": { this.next(); const value = this.expr(); this.endStmt(); return { k: "Throw", value }; }
+        case "throw": {
+          this.next();
+          const value = this.expr();
+          // throw "Name" "message"  (a comma between the two is optional)
+          if (!this.eol() && !this.kw("end") && (value.k === "Lit" || value.k === "Str")) {
+            this.accept("op", ",");
+            const msg = this.expr();
+            if (value.k !== "Lit" || typeof value.v !== "string" || !(msg.k === "Lit" && typeof msg.v === "string" || msg.k === "Str"))
+              throw this.err("throw with a name expects two strings");
+            this.endStmt(); return { k: "Throw", name: value.v, value: msg };
+          }
+          this.endStmt(); return { k: "Throw", value };
+        }
         case "defer": {
           this.next();
           if (this.is("nl")) { this.next(); const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt(); return { k: "Defer", body }; }
@@ -439,6 +460,7 @@ class Parser {
         }
       }
     }
+    if (tk.t === "id" && tk.v === "assert" && !this.is("op", "=", 1) && !this.is("op", ".", 1) && !this.eol1()) return this.assertStmt();
     // typed declaration: Type name [= value]
     if (tk.t === "id" || this.op("(") || this.op("[") || (tk.t === "kw" && tk.v === "function")) {
       const save = this.p;
@@ -461,12 +483,39 @@ class Parser {
     return this.exprStatement();
   }
   importStmt() {
-    this.next();
+    const itk = this.next();
+    // native imports: import c name / cxx / import++ / rust / zig
+    let lang = null;
+    if (this.op("+") && this.op("+", 1) && !this.peek().sp) { this.next(); this.next(); lang = "cxx"; }
+    else if (this.is("id") && /^(c|cxx|rust|zig)$/.test(this.peek().v) && (this.is("id", undefined, 1) || this.is("str", undefined, 1))) lang = this.next().v;
+    if (lang) {
+      let path;
+      if (this.is("str")) path = this.strPlain(this.next());
+      else { path = this.name(); while (this.accept("op", ".")) path += "." + this.name(); }
+      let alias = null; if (this.accept("kw", "as")) alias = this.name();
+      this.endStmt();
+      return { k: "Import", path, alias, native: lang };
+    }
+    // string imports: a module name, a file path, or a URL
+    if (this.is("str")) {
+      const spec = this.strPlain(this.next());
+      let alias = null; if (this.accept("kw", "as")) alias = this.name();
+      this.endStmt();
+      const isFile = /^[a-z][a-z0-9+.-]*:\/\//i.test(spec) || /[\/\\]/.test(spec) || /\.(fw|fly)$/.test(spec);
+      if (!isFile) return { k: "Import", path: spec, wildcard: false, alias };
+      const base = spec.split(/[\/\\]/).pop().replace(/\.(fw|fly)$/, "");
+      if (!alias && !/^[A-Za-z_]\w*$/.test(base)) throw this.S.err(`'${base}' is not a valid module name; add \`as name\``, itk.s);
+      return { k: "Import", path: spec, alias: alias || base, file: true };
+    }
     let path = this.name(), wildcard = false, alias = null;
     while (this.accept("op", ".")) { if (this.accept("op", "*")) { wildcard = true; break; } path += "." + this.name(); }
     if (this.accept("kw", "as")) alias = this.name();
     this.endStmt();
     return { k: "Import", path, wildcard, alias };
+  }
+  strPlain(tk) {
+    if (!(tk.v.length === 1 && typeof tk.v[0] === "string") && tk.v.length !== 0) throw this.err("expected a plain string", tk);
+    return tk.v.length ? tk.v[0] : "";
   }
   params() {
     const params = [];
@@ -674,17 +723,42 @@ class Parser {
     if (e.k === "List") return { p: "Seq", items: e.items.map(a => this.argToPattern(a)) };
     return { p: "Value", e };
   }
+  assertStmt() {
+    this.next();
+    let cond, msg = null;
+    if (this.op("(") && !this.peek().sp) {          // assert(cond, "message")
+      const save = this.p;
+      try {
+        this.next();
+        const items = this.withNL(1, () => { const a = []; while (!this.op(")")) { a.push(this.expr()); if (!this.accept("op", ",")) break; } this.expect("op", ")"); return a; });
+        if (this.eol() && items.length >= 1 && items.length <= 2) { cond = items[0]; msg = items[1] || null; }
+        else this.p = save;
+      } catch (e) { if (!(e instanceof CompileError)) throw e; this.p = save; }
+    }
+    if (!cond) {
+      cond = this.expr();
+      if (!this.eol() && !this.kw("end")) { this.accept("op", ","); msg = this.expr(); }
+    }
+    this.endStmt();
+    return { k: "Assert", cond, msg };
+  }
   tryStmt() {
     this.next();
-    const body = this.block(["catch", "finally", "end"]);
+    const body = this.block(["catch", "finally", "then", "end"]);
     const catches = []; let fin = null;
     while (this.accept("kw", "catch")) {
       let type = null, name = null;
-      if (this.is("id") && this.is("id", undefined, 1)) { type = this.type().name; name = this.name(); }
+      if (this.is("str")) {                           // catch "Name" e
+        const tk = this.next();
+        if (!(tk.v.length === 1 && typeof tk.v[0] === "string")) throw this.err("a catch name must be a plain string", tk);
+        type = tk.v[0]; if (this.is("id")) name = this.name();
+      }
+      else if (this.is("id") && this.is("id", undefined, 1)) { type = this.type().name; name = this.name(); }
       else if (this.is("id")) { const n = this.name(); if (/^[A-Z]/.test(n) && (n === "Error" || ERROR_TYPES.includes(n))) type = n; else name = n; }
-      catches.push({ type, name, body: this.block(["catch", "finally", "end"]) });
+      catches.push({ type, name, body: this.block(["catch", "finally", "then", "end"]) });
     }
-    if (this.accept("kw", "finally")) fin = this.block(["end"]);
+    if (!catches.length && !this.is("kw", "finally") && !this.is("kw", "then")) throw this.err("try requires catch, finally, or then");
+    if (this.accept("kw", "finally") || this.accept("kw", "then")) fin = this.block(["end"]);
     this.expect("kw", "end"); this.endStmt();
     return { k: "Try", body, catches, fin };
   }
@@ -709,6 +783,17 @@ class Parser {
     if (tk.t === "id" || (tk.t === "kw" && (tk.v === "inst" || tk.v === "super"))) {
       const save = this.p;
       let head = this.postfix(this.primary(), true);
+      if ((head.k === "Ident" || head.k === "Member" || head.k === "InstField") && this.op("(") && this.peek().sp) {
+        const after = this.p;
+        try {
+          this.next();
+          const args = this.withNL(1, () => { const a = []; while (!this.op(")")) { a.push(this.expr()); if (!this.accept("op", ",")) break; } this.expect("op", ")"); return a; });
+          const nt = this.peek();
+          const continues = this.binOp() || this.op(",") || (nt.t === "op" && /^[.\[(?]$/.test(nt.v)) || nt.t === "str" || nt.t === "id" || nt.t === "num";
+          if (!continues) return { k: "Call", callee: head, args, outer: true, line: this.line(tk) };
+        } catch (e) { if (!(e instanceof CompileError)) throw e; }
+        this.p = after;
+      }
       if ((head.k === "Ident" || head.k === "Member" || head.k === "InstField") && this.canStartOuterArg()) {
         const args = [];
         do args.push(this.expr()); while (this.accept("op", ","));
@@ -722,7 +807,7 @@ class Parser {
   canStartOuterArg() {
     const t = this.peek();
     if (t.t === "nl" || t.t === "eof") return false;
-    if (t.t === "num" || t.t === "str" || t.t === "char" || t.t === "markup" || t.t === "id") return true;
+    if (t.t === "num" || t.t === "str" || t.t === "char" || t.t === "markup" || t.t === "json" || t.t === "id") return true;
     if (t.t === "kw") return /^(true|false|null|not|function|inst|attr)$/.test(t.v);
     if (t.t === "op") {
       if ((t.v === "(" || t.v === "[") && t.sp) return true;
@@ -778,6 +863,7 @@ class Parser {
       case "str": return this.strNode(tk.v);
       case "char": return { k: "Lit", v: tk.v };
       case "markup": return this.markup(tk.v);
+      case "json": return { k: "JsonLit", v: tk.v };
       case "id": return { k: "Ident", name: tk.v, line };
       case "kw":
         switch (tk.v) {
@@ -1121,6 +1207,8 @@ class Scope {
  * ========================================================================================= */
 class Interp {
   constructor(opts) {
+    this.opts = opts;
+    this.argv = (opts.args || []).slice();
     this.out = opts.print || (s => console.log(s));
     this.errOut = opts.error || (s => console.error(s));
     this.global = new Scope(null, null);
@@ -1241,10 +1329,12 @@ class Interp {
     return en;
   }
   doImport(st, scope) {
+    if (st.native) throw new FwThrow(new FwError("NativeError", `native imports (import ${st.native === "cxx" ? "c++" : st.native}) are not available in flywheel.js; install Flywheel to compile ${st.native === "cxx" ? "C++" : st.native === "c" ? "C" : st.native === "rust" ? "Rust" : "Zig"} code`));
+    if (st.file) throw new FwThrow(new FwError("RuntimeError", `importing files and URLs ('${st.path}') is not available in flywheel.js; install Flywheel to use them`));
     const root = st.path.split(".")[0];
     const mod = this.modules[root];
     if (!mod) {
-      const native = ["fs", "io", "os", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
+      const native = ["fs", "io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
       if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in flywheel.js; install Flywheel to use it`));
       throw new FwThrow(new FwError("RuntimeError", `unknown module '${st.path}'`));
     }
@@ -1308,8 +1398,15 @@ class Interp {
       case "Continue": throw CONTINUE;
       case "Throw": {
         const v = this.eval(st.value, scope);
+        if (st.name !== undefined) throw new FwThrow(new FwError(st.name, this.show(v, false)));
         if (v === null) fail("RuntimeError", "cannot throw null");
         throw new FwThrow(v);
+      }
+      case "Assert": {
+        const c = this.eval(st.cond, scope);
+        if (typeof c !== "boolean") fail("CastError", `condition must be bool, got ${this.typeName(c)}`);
+        if (!c) fail("AssertionError", st.msg ? this.show(this.eval(st.msg, scope), false) : "assertion failed");
+        return;
       }
       case "Defer": this.execBlock(st.body, scope); return;
     }
@@ -1387,6 +1484,7 @@ class Interp {
   catchMatches(type, v, scope) {
     if (!type || type === "Error") return true;
     if (v instanceof FwError) return v.type === type;
+    if (v instanceof Instance && v.cls.name === type) return true;
     const cls = scope.get(type);
     if (cls instanceof FwClass && v instanceof Instance) return isSubclass(v.cls, cls);
     return false;
@@ -1682,6 +1780,7 @@ class Interp {
         return base;
       }
       case "Lambda": return new FwFunc("lambda", e.params, e.body, scope);
+      case "JsonLit": return new JsonVal(JSON.parse(JSON.stringify(e.v)));
       case "Markup": return this.evalMarkup(e, scope);
     }
     throw new Error("cannot evaluate " + e.k);
@@ -1914,7 +2013,7 @@ class Interp {
     }
     if (obj instanceof FwError) {
       if (name === "message") return obj.message;
-      if (name === "type") return obj.type;
+      if (name === "name" || name === "type") return obj.type;
     }
     if (obj instanceof ResultVal) {
       if (name === "is_ok") return obj.ok;
@@ -2618,10 +2717,18 @@ function makeModules(I) {
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     return pat.replace(/%([YmdHMSaAbBjyZ%])/g, (_, c) => ({ Y: g.Y, m: pad(g.m), d: pad(g.d), H: pad(g.H), M: pad(g.M), S: pad(g.S), a: days[g.w].slice(0, 3), A: days[g.w], b: months[g.m - 1].slice(0, 3), B: months[g.m - 1], y: pad(g.Y % 100), Z: local ? "" : "UTC", j: pad(Math.floor((d - new Date(Date.UTC(g.Y, 0, 1))) / 864e5) + 1, 3), "%": "%" }[c]));
   };
+  const wait = secs => { const end = Date.now() + Math.min(Math.max(secs, 0), 2) * 1000; while (Date.now() < end) { /* busy wait (capped) */ } return null; };
   const time = mod("time", {
     now: () => Date.now() / 1000,
     monotonic: () => ((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) / 1000,
-    sleep: ([s]) => { const end = Date.now() + Math.min(num(s), 2) * 1000; while (Date.now() < end) { /* busy wait (capped) */ } return null; },
+    sleep: ([s]) => wait(num(s)), delay: ([s]) => wait(num(s)),
+    sleep_ms: ([ms]) => wait(num(ms) / 1000),
+    millis: () => BigInt(Math.floor(((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0))),
+    elapsed: ([start]) => ((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) / 1000 - num(start),
+    unix: () => BigInt(Math.floor(Date.now() / 1000)),
+    today: () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; },
+    clock: () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; },
+    timestamp: () => new Date().toISOString().replace(/\.\d+Z$/, "Z"),
     format: ([s, p]) => strftime(s, p || "%Y-%m-%dT%H:%M:%SZ", false),
     format_local: ([s, p]) => strftime(s, p || "%Y-%m-%d %H:%M:%S", true),
     from_date: ([y, mo, d, h, mi, s]) => Date.UTC(num(y), num(mo) - 1, num(d), num(h || 0n), num(mi || 0n), 0) / 1000 + num(s || 0),
@@ -2639,6 +2746,13 @@ function makeModules(I) {
     parse: ([t]) => { try { return new JsonVal(JSON.parse(t)); } catch (e) { fail("JsonError", "invalid JSON: " + e.message); } },
     encode: ([v, indent]) => JSON.stringify(I.toJson(v), null, indent ? Number(indent) : undefined),
     stringify: ([v]) => JSON.stringify(sortKeys(v instanceof JsonVal ? v.v : I.toJson(v))),
+    loads: ([t]) => { try { return new JsonVal(JSON.parse(t)); } catch (e) { fail("JsonError", "invalid JSON: " + e.message); } },
+    dumps: ([v, indent]) => JSON.stringify(I.toJson(v), null, indent ? Number(indent) : undefined),
+    load: ([path]) => {
+      const text = hostFile(I, "read", path);
+      try { return new JsonVal(JSON.parse(text)); } catch (e) { fail("JsonError", "invalid JSON: " + e.message); }
+    },
+    dump: ([v, path, indent]) => { hostFile(I, "write", path, JSON.stringify(I.toJson(v), null, indent ? Number(indent) : undefined)); return null; },
     get: ([v, k]) => I.index(v, k), at: ([v, i]) => I.index(v, i),
     has: ([v, k]) => !!(v.v && typeof v.v === "object" && k in v.v),
     length: ([v]) => I.props(v, "length"),
@@ -2701,8 +2815,37 @@ function makeModules(I) {
   const desktop = mod("desktop", {
     window: ([title]) => { const w = new Window(title === undefined ? "Flywheel" : title); return w; },
   });
-  const os = mod("os", { args: () => [], env: () => "", exit: ([c]) => { throw new ExitSig(Number(c || 0n)); } });
-  return { math, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os };
+  const os = mod("os", { args: () => I.argv.slice(), env: () => "", exit: ([c]) => { throw new ExitSig(Number(c || 0n)); } });
+  // Runs another file in a fresh interpreter and returns its top-level return value as json.value.
+  const runFile = (file, args, quiet) => {
+    const code = hostFile(I, "read", file, undefined, "ProcessError");
+    const child = new Interp(Object.assign({}, I.opts, { args: (args || []).map(String), stdin: undefined }));
+    const t = Date.now();
+    const r = child.run(code, String(file).split(/[\/\\]/).pop());
+    if (r.status !== 0 && !(r.value !== undefined && r.value !== null)) fail("ProcessError", `${file} exited with status ${r.status}`);
+    r.ms = Date.now() - t;
+    r.interp = child;
+    return r;
+  };
+  const retJson = r => r.value === null || r.value === undefined ? new JsonVal(null) : r.value instanceof FwElement ? new JsonVal(r.interp.render(r.value)) : new JsonVal(I.toJson(r.value));
+  const flywheel = mod("flywheel", {
+    run: ([file, args]) => retJson(runFile(file, args)),
+    debug: ([file, args]) => {
+      const r = runFile(file, args), j = retJson(r);
+      I.errOut(`[debug] ${r.value === null || r.value === undefined ? "no return value" : "returned " + JSON.stringify(j.v)} in ${r.ms} ms`);
+      return j;
+    },
+    export: ([file, output, args]) => {
+      const r = runFile(file, args);
+      if (r.value === null || r.value === undefined) fail("ProcessError", `${file} returned no value`);
+      const text = typeof r.value === "string" ? r.value : r.value instanceof FwElement ? r.interp.render(r.value) : JSON.stringify(I.toJson(r.value));
+      hostFile(I, "write", output, text);
+      return retJson(r);
+    },
+    desktop: () => fail("ProcessError", "flywheel.desktop is not available in flywheel.js; use the playground's app pane or install Flywheel"),
+    serve: () => fail("ProcessError", "flywheel.serve is not available in flywheel.js; install Flywheel to serve pages"),
+  });
+  return { math, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os, flywheel };
 }
 // Lenient HTML reader for html.parse: lower-cased names, implicit closes, raw text elements.
 function parseHtml(I, text) {
@@ -2751,6 +2894,16 @@ function parseHtml(I, text) {
   }
   return root;
 }
+// File access for json.load / json.dump / flywheel.* : only where Node's fs exists.
+function hostFile(I, mode, path, text, errType) {
+  let fs = null;
+  try { if (typeof process !== "undefined" && process.versions && process.versions.node && typeof require === "function") fs = require("fs"); } catch (e) { fs = null; }
+  const type = errType || "FileError";
+  if (!fs) fail(type, `files are not available in the browser (flywheel.js): '${path}'`);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) fail(type, `URLs are not available in flywheel.js: '${path}'`);
+  try { return mode === "read" ? fs.readFileSync(path, "utf8") : (fs.writeFileSync(path, text), null); }
+  catch (e) { fail(type, `${mode === "read" ? "cannot read" : "cannot write"} '${path}': ${e.code || e.message}`); }
+}
 function sortKeys(v) {
   if (Array.isArray(v)) return v.map(sortKeys);
   if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])]));
@@ -2797,7 +2950,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.3 (beta-3) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.9 (beta-9) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

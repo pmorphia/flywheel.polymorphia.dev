@@ -262,6 +262,7 @@ class Release
 end
 
 Release[] releases = [
+    Release("2.9 beta-9", "2026-11", ["Named errors and assert", "<json> literals"]),
     Release("2.3 beta-3", "2026-10", ["Desktop windows on Windows", "Race detector: flywheel run --race"]),
     Release("2.2", "2026-07", ["Enums with data", "Format specs in interpolation"]),
     Release("2.1", "2026-04", ["Generic methods", "SQLite built in"])

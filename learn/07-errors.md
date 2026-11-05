@@ -1,6 +1,6 @@
 # Errors, Results and defer
 
-`throw` raises a value; `catch Type name` handles that type, and `finally` always runs. Built-in errors include `KeyError`, `IndexError`, `ValueError` and `NumericError`.
+`throw` raises a value; `catch Type name` handles that type, and `finally` (or `then`) always runs. You can also raise an error by name without declaring a class: `throw "Name" "message"` is caught by `catch "Name" e`, and `assert condition "message"` raises an `AssertionError`. Built-in errors include `KeyError`, `IndexError`, `ValueError` and `NumericError`.
 
 ```flywheel
 class ParseError
@@ -30,6 +30,35 @@ for input in ["42", "", "-3", "x"] do
     finally
         print "  checked '{input}'"
     end
+end
+```
+
+## Named errors and assert
+
+For a quick error you don't need a class. `throw "Name" "message"` raises an error called `Name`, and `catch "Name" e` handles it. Every error has `.name` and `.message`. `assert` raises an `AssertionError` when its condition is false, and `then` is another spelling of `finally`.
+
+```flywheel
+function load(string key) returns string
+    if key == "" then
+        throw "EmptyKey" "the key is empty"
+    end
+    return key
+end
+
+for key in ["name", ""] do
+    try
+        print "loaded", load(key)
+    catch "EmptyKey" e
+        print e.name + ":", e.message
+    then
+        print "  done with '{key}'"
+    end
+end
+
+try
+    assert 2 + 2 == 5 "arithmetic broke"
+catch AssertionError a
+    print a.message
 end
 ```
 
