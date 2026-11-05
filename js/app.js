@@ -503,7 +503,7 @@ const term = (() => {
     } },
     { name: "learn", desc: "open the lessons", args: LESSONS.map(l => l.id), run(a) { go("#/learn" + (a[0] ? "/" + lessonId(a[0]) : "")); } },
     { name: "docs", alias: ["man"], desc: "open the documentation", args: DOCS.map(d => d.id), run(a) { go("#/docs" + (a[0] ? "/" + a[0] : "")); } },
-    { name: "install", desc: "open the install menu (flywheel / lite / flywheel.js)", args: ["flywheel", "lite", "js", "sh", "ps1"], run(a) {
+    { name: "install", desc: "open the install menu (flavors: flywheel / lite / flywheel.js)", args: ["flywheel", "lite", "js", "sh", "ps1"], run(a) {
         if (a[0] === "flywheel-lite" || a[0] === "fwl") a = ["lite"];
         const os = a[0] === "ps1" ? "windows" : a[0] === "sh" ? "linux" : OS;
         const it = INSTALL[os];
@@ -888,7 +888,7 @@ dlg.addEventListener("click", e => {
 ipanel.addEventListener("transitionend", e => { if (e.target === ipanel && e.propertyName === "clip-path" && dlg.classList.contains("in")) dlg.classList.add("done"); });
 dlg.addEventListener("cancel", e => { e.preventDefault(); closeInstall(); });
 $("#installClose").addEventListener("click", closeInstall);
-// arrow keys move between the three choices, like a radio group
+// arrow keys move between the three flavors, like a radio group
 $(".ichoice").addEventListener("keydown", e => {
   const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
   if (!dir) return;

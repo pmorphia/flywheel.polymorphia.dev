@@ -1,6 +1,6 @@
 # The playground
 
-The Flywheel compiler is C++ on top of LLVM and produces native executables, so it can't run inside a web page. This site runs Flywheel with **[flywheel.js](https://github.com/fwlang/flywheel.js)** instead. It is a JavaScript implementation of the language that follows the compiler's semantics and output formatting, and its output was checked against `flywheel run` on the repository's examples and the code in these docs. flywheel.js also runs in Node (`npx flywheel-js run main.fw`) if you want it outside the browser.
+The Flywheel compiler is C++ on top of LLVM and produces native executables, so it can't run inside a web page. This site runs Flywheel with **[flywheel.js](https://github.com/fwlang/flywheel.js)** instead. It is the JavaScript flavor of Flywheel that follows the compiler's semantics and output formatting, and its output was checked against `flywheel run` on the repository's examples and the code in these docs. flywheel.js also runs in Node (`npx flywheel-js run main.fw`) if you want it outside the browser.
 
 ## What works
 
