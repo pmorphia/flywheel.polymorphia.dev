@@ -803,11 +803,18 @@ function openInstall(from) {
   const r = ipanel.getBoundingClientRect(), b = (from || $("#installBtn")).getBoundingClientRect();
   ipanel.style.setProperty("--ox", Math.round(b.left + b.width / 2 - r.left) + "px");
   ipanel.style.setProperty("--oy", Math.round(b.top + b.height / 2 - r.top) + "px");
-  dlg.classList.remove("in"); void dlg.offsetWidth;
+  // radius that reaches the farthest corner of the whole panel (including scrolled-off content), plus slack
+  const ox = b.left + b.width / 2 - r.left, oy = b.top + b.height / 2 - r.top, h = Math.max(r.height, ipanel.scrollHeight);
+  ipanel.style.setProperty("--r", Math.ceil(Math.hypot(Math.max(Math.abs(ox), Math.abs(r.width - ox)), Math.max(Math.abs(oy), Math.abs(h - oy))) + 120) + "px");
+  dlg.classList.remove("in", "done"); void dlg.offsetWidth;
   requestAnimationFrame(() => dlg.classList.add("in"));
+  // fallback in case transitionend never fires (reduced motion, interrupted transition)
+  setTimeout(() => { if (dlg.open && dlg.classList.contains("in")) dlg.classList.add("done"); }, reduced ? 50 : 1100);
 }
 function closeInstall() {
   if (!dlg.open || closing) return;
+  // clip-path can't animate from `none`, so put the full circle back before shrinking it
+  dlg.classList.remove("done"); void dlg.offsetWidth;
   dlg.classList.remove("in"); dlg.classList.add("out");
   closing = setTimeout(() => { closing = null; dlg.classList.remove("out"); dlg.close(); }, reduced ? 10 : 420);
 }
@@ -831,6 +838,7 @@ dlg.addEventListener("click", e => {
   if (t.closest("#jsPlay")) { closeInstall(); go("#/"); return; }
   if (t.closest("#jsLearn")) { closeInstall(); }
 });
+ipanel.addEventListener("transitionend", e => { if (e.target === ipanel && e.propertyName === "clip-path" && dlg.classList.contains("in")) dlg.classList.add("done"); });
 dlg.addEventListener("cancel", e => { e.preventDefault(); closeInstall(); });
 $("#installClose").addEventListener("click", closeInstall);
 // arrow keys move between the two choices, like a radio group

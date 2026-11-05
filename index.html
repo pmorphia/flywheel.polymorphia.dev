@@ -291,7 +291,9 @@
     clip-path: circle(0px at var(--ox, 90%) var(--oy, 0%));
     transition: clip-path .75s cubic-bezier(.22, .8, .18, 1), --ia .55s var(--ease), --ib .55s var(--ease), border-color .55s var(--ease);
   }
-  .idlg.in .ipanel { clip-path: circle(160% at var(--ox, 90%) var(--oy, 0%)); }
+  .idlg.in .ipanel { clip-path: circle(var(--r, 3000px) at var(--ox, 90%) var(--oy, 0%)); }
+  /* once the reveal has finished nothing may clip the panel */
+  .idlg.in.done .ipanel { clip-path: none; }
   .idlg.out .ipanel { clip-path: circle(0px at var(--ox, 90%) var(--oy, 0%)); transition-duration: .4s, .55s, .55s, .55s; transition-timing-function: cubic-bezier(.5, 0, .75, 0), var(--ease), var(--ease), var(--ease); }
   .ipanel[data-theme="js"] { --ia: #7dd3fc; --ib: #6366f1; --ink: #03121c; }
   .ipanel[data-theme="pulley"] { --ia: #c4b5fd; --ib: #7c3aed; }
