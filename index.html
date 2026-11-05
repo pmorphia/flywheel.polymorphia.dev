@@ -295,6 +295,7 @@
   /* once the reveal has finished nothing may clip the panel */
   .idlg.in.done .ipanel { clip-path: none; }
   .idlg.out .ipanel { clip-path: circle(0px at var(--ox, 90%) var(--oy, 0%)); transition-duration: .4s, .55s, .55s, .55s; transition-timing-function: cubic-bezier(.5, 0, .75, 0), var(--ease), var(--ease), var(--ease); }
+  .ipanel[data-theme="turbine"] { --ia: #fdba74; --ib: #ea580c; --ink: #1c0a02; }
   .ipanel[data-theme="js"] { --ia: #7dd3fc; --ib: #6366f1; --ink: #03121c; }
   .ipanel[data-theme="pulley"] { --ia: #c4b5fd; --ib: #7c3aed; }
   .ipanel[data-theme="polymorphia"] { --ia: #f9a8d4; --ib: #fb7185; }
@@ -320,12 +321,13 @@
     transition: color .2s, border-color .2s, transform .3s var(--ease);
   }
   .iclose:hover { color: var(--fg); border-color: var(--ia); transform: rotate(90deg); }
-  .ichoice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .ichoice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .icard {
     --c: #d4ff3a; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; align-items: center;
     padding: 16px 16px 15px; border-radius: 14px; border: 1px solid var(--line2); background: rgba(255,255,255,.015);
     transition: border-color .35s var(--ease), background .35s var(--ease), transform .35s var(--ease), box-shadow .35s var(--ease);
   }
+  .icard[data-pick="turbine"] { --c: #fdba74; }
   .icard[data-pick="js"] { --c: #7dd3fc; }
   .icard .ilogo { background: var(--c); width: 42px; height: 42px; grid-row: span 2; filter: none; opacity: .75; transition: opacity .3s, transform .6s var(--ease); }
   .icard b { font-size: 15.5px; color: var(--fg); }
@@ -341,16 +343,17 @@
   }
   .icard[aria-checked="true"] .ilogo { opacity: 1; }
   .itable-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; background: rgba(0,0,0,.18); }
-  .itable { border-collapse: collapse; width: 100%; font-size: 12.3px; min-width: 640px; }
+  .itable { border-collapse: collapse; width: 100%; font-size: 12.3px; min-width: 760px; }
   .itable th, .itable td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
   .itable tr:last-child td, .itable tr:last-child th { border-bottom: 0; }
   .itable thead th { font-size: 12px; color: var(--fg); background: rgba(255,255,255,.025); position: sticky; top: 0; }
-  .itable tbody th { color: var(--dim); font-weight: 500; width: 21%; white-space: nowrap; }
-  .itable td { color: #cfcfd6; width: 39.5%; transition: background .45s var(--ease), color .45s var(--ease); }
+  .itable tbody th { color: var(--dim); font-weight: 500; width: 16%; white-space: nowrap; }
+  .itable td { color: #cfcfd6; width: 28%; transition: background .45s var(--ease), color .45s var(--ease); }
   .itable .yes { color: var(--green); } .itable .no { color: var(--red); } .itable .mid { color: var(--amber); }
-  .itable .col-fw { --c: #d4ff3a; } .itable .col-js { --c: #7dd3fc; }
-  .itable thead th.col-fw, .itable thead th.col-js { color: var(--c); }
+  .itable .col-fw { --c: #d4ff3a; } .itable .col-tb { --c: #fdba74; } .itable .col-js { --c: #7dd3fc; }
+  .itable thead th.col-fw, .itable thead th.col-tb, .itable thead th.col-js { color: var(--c); }
   .ipanel[data-theme="flywheel"] .itable .col-fw:not(thead *) { background: rgba(212, 255, 58, .06); color: #ecefdc; }
+  .ipanel[data-theme="turbine"] .itable .col-tb:not(thead *) { background: rgba(253, 186, 116, .07); color: #f7e9dc; }
   .ipanel[data-theme="js"] .itable .col-js:not(thead *) { background: rgba(125, 211, 252, .07); color: #e2f1fa; }
   .idetail { border: 1px solid color-mix(in srgb, var(--ia) 22%, var(--line)); border-radius: 14px; padding: 16px; background: rgba(0,0,0,.2); transition: border-color .5s var(--ease); }
   .idetail h3 { margin: 0 0 4px; font-size: 14px; }
@@ -386,10 +389,10 @@
   .ifam a { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); }
   .ifam a:hover { color: var(--fg); text-decoration: none; }
   .ifam .ilogo { width: 18px; height: 18px; filter: none; }
-  .ifam a[data-t="flywheel"] .ilogo { background: #d4ff3a; } .ifam a[data-t="js"] .ilogo { background: #7dd3fc; }
+  .ifam a[data-t="flywheel"] .ilogo { background: #d4ff3a; } .ifam a[data-t="turbine"] .ilogo { background: #fdba74; } .ifam a[data-t="js"] .ilogo { background: #7dd3fc; }
   .ifam a[data-t="pulley"] .ilogo { background: #c4b5fd; } .ifam a[data-t="polymorphia"] .ilogo { background: #f9a8d4; }
   @media (max-width: 720px) {
-    .ichoice { grid-template-columns: 1fr; } .ipanel { padding: 20px 14px 16px; }
+    .ichoice { grid-template-columns: minmax(0, 1fr); } .ipanel { padding: 20px 14px 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .ipanel, .stag > *, .idlg::backdrop, .ilogo { transition-duration: .01s !important; animation: none !important; transition-delay: 0s !important; }
@@ -517,7 +520,7 @@
     <div class="stag">
       <div class="ihead" style="--i:0">
         <span class="ilogo" id="iLogo" aria-hidden="true"></span>
-        <div><h2 id="installTitle">Install <em id="iName">flywheel</em></h2><p>Two ways to run Flywheel. Pick one, compare them below, then follow the steps.</p></div>
+        <div><h2 id="installTitle">Install <em id="iName">flywheel</em></h2><p>Three ways to run Flywheel. Pick one, compare them below, then follow the steps.</p></div>
       </div>
 
       <div class="ichoice" role="radiogroup" aria-label="Version" style="--i:1">
@@ -526,6 +529,12 @@
           <b>flywheel</b>
           <small>The native compiler. Builds executables with LLVM, runs <code>.fw</code> files directly.</small>
           <span class="tags"><span>fastest</span><span>native code</span><span>full library</span></span>
+        </button>
+        <button type="button" class="icard" role="radio" aria-checked="false" data-pick="turbine">
+          <span class="ilogo" aria-hidden="true"></span>
+          <b>turbine</b>
+          <small>A bytecode VM in portable C. Runs <code>.fw</code> files with no LLVM; builds in seconds.</small>
+          <span class="tags"><span>quick install</span><span>macOS too</span><span>~1 ms start</span></span>
         </button>
         <button type="button" class="icard" role="radio" aria-checked="false" data-pick="js">
           <span class="ilogo" aria-hidden="true"></span>
@@ -536,19 +545,19 @@
       </div>
 
       <div class="itable-wrap" style="--i:2">
-        <table class="itable" aria-label="flywheel compared with flywheel.js">
-          <thead><tr><th></th><th class="col-fw">flywheel</th><th class="col-js">flywheel.js</th></tr></thead>
+        <table class="itable" aria-label="flywheel, turbine and flywheel.js compared">
+          <thead><tr><th></th><th class="col-fw">flywheel</th><th class="col-tb">turbine</th><th class="col-js">flywheel.js</th></tr></thead>
           <tbody>
-            <tr><th>What it is</th><td class="col-fw">Compiler on LLVM that produces native executables</td><td class="col-js">Tree-walking interpreter in one dependency-free JavaScript file</td></tr>
-            <tr><th>Best for</th><td class="col-fw">Real projects, shipping programs, anything performance-sensitive</td><td class="col-js">Learning, demos, prototyping, embedding Flywheel in a web page</td></tr>
-            <tr><th>Speed</th><td class="col-fw"><span class="yes">Faster</span> — runs <code>.fw</code> directly (faster than Python) or compiles to native code</td><td class="col-js"><span class="mid">Slower</span> — an interpreter; long runs are stopped in the playground</td></tr>
-            <tr><th>Runs in browser</th><td class="col-fw"><span class="no">No</span></td><td class="col-js"><span class="yes">Yes</span> — browser, Web Worker or Node</td></tr>
-            <tr><th>Install</th><td class="col-fw">Installer script builds it (LLVM 21–23 + CMake)</td><td class="col-js"><span class="yes">None</span> in the browser; a script tag, one file, or npx</td></tr>
-            <tr><th>Compile to an executable</th><td class="col-fw"><span class="yes">Yes</span> — <code>flywheel build -O3</code></td><td class="col-js"><span class="no">No</span></td></tr>
-            <tr><th>Type checking</th><td class="col-fw"><span class="yes">Yes</span></td><td class="col-js"><span class="no">No</span> — programs the compiler rejects may still run</td></tr>
-            <tr><th>Files, network, processes, databases</th><td class="col-fw"><span class="yes">Yes</span> — fs, net, os, sqlite, HTTPS, threads</td><td class="col-js"><span class="no">No</span> — a browser-safe subset (<code>json.load</code> and <code>flywheel.run</code> work in Node)</td></tr>
-            <tr><th>Native code imports</th><td class="col-fw"><span class="yes">Yes</span> — C, C++, Rust, Zig</td><td class="col-js"><span class="no">No</span> — raises a catchable <code>NativeError</code></td></tr>
-            <tr><th>Platforms</th><td class="col-fw">Linux, Windows. <span class="no">macOS: not supported</span> (never tested)</td><td class="col-js">Anywhere JavaScript runs</td></tr>
+            <tr><th>What it is</th><td class="col-fw">Compiler on LLVM that produces native executables</td><td class="col-tb">Bytecode virtual machine in portable C11; one ~0.5 MB executable</td><td class="col-js">Tree-walking interpreter in one dependency-free JavaScript file</td></tr>
+            <tr><th>Best for</th><td class="col-fw">Real projects, shipping programs, anything performance-sensitive</td><td class="col-tb">Scripts and tools, quick setups, macOS, machines without LLVM</td><td class="col-js">Learning, demos, prototyping, embedding Flywheel in a web page</td></tr>
+            <tr><th>Speed</th><td class="col-fw"><span class="yes">Faster</span> — runs <code>.fw</code> directly (faster than Python) or compiles to native code</td><td class="col-tb"><span class="mid">Middle</span> — about CPython speed; starts in ~1 ms</td><td class="col-js"><span class="mid">Slower</span> — an interpreter; long runs are stopped in the playground</td></tr>
+            <tr><th>Runs in browser</th><td class="col-fw"><span class="no">No</span></td><td class="col-tb"><span class="no">No</span></td><td class="col-js"><span class="yes">Yes</span> — browser, Web Worker or Node</td></tr>
+            <tr><th>Install</th><td class="col-fw">Installer script builds it (LLVM 21–23 + CMake)</td><td class="col-tb"><span class="yes">Quick</span> — installer script; needs only a C compiler, builds in seconds</td><td class="col-js"><span class="yes">None</span> in the browser; a script tag, one file, or npx</td></tr>
+            <tr><th>Compile to an executable</th><td class="col-fw"><span class="yes">Yes</span> — <code>flywheel build -O3</code></td><td class="col-tb"><span class="no">No</span></td><td class="col-js"><span class="no">No</span></td></tr>
+            <tr><th>Type checking</th><td class="col-fw"><span class="yes">Yes</span></td><td class="col-tb"><span class="mid">At run time</span> — mismatches raise <code>TypeError</code> when reached</td><td class="col-js"><span class="no">No</span> — programs the compiler rejects may still run</td></tr>
+            <tr><th>Files, network, processes, databases</th><td class="col-fw"><span class="yes">Yes</span> — fs, net, os, sqlite, HTTPS, threads</td><td class="col-tb"><span class="mid">Partly</span> — fs, os processes, json, time, html; no net, sqlite or threads</td><td class="col-js"><span class="no">No</span> — a browser-safe subset (<code>json.load</code> and <code>flywheel.run</code> work in Node)</td></tr>
+            <tr><th>Native code imports</th><td class="col-fw"><span class="yes">Yes</span> — C, C++, Rust, Zig</td><td class="col-tb"><span class="no">No</span></td><td class="col-js"><span class="no">No</span> — raises a catchable <code>NativeError</code></td></tr>
+            <tr><th>Platforms</th><td class="col-fw">Linux, Windows. <span class="no">macOS: not supported</span> (never tested)</td><td class="col-tb">Linux, Windows, <span class="yes">macOS</span></td><td class="col-js">Anywhere JavaScript runs</td></tr>
           </tbody>
         </table>
       </div>
