@@ -291,7 +291,9 @@
     clip-path: circle(0px at var(--ox, 90%) var(--oy, 0%));
     transition: clip-path .75s cubic-bezier(.22, .8, .18, 1), --ia .55s var(--ease), --ib .55s var(--ease), border-color .55s var(--ease);
   }
-  .idlg.in .ipanel { clip-path: circle(160% at var(--ox, 90%) var(--oy, 0%)); }
+  .idlg.in .ipanel { clip-path: circle(var(--r, 3000px) at var(--ox, 90%) var(--oy, 0%)); }
+  /* once the reveal has finished nothing may clip the panel */
+  .idlg.in.done .ipanel { clip-path: none; }
   .idlg.out .ipanel { clip-path: circle(0px at var(--ox, 90%) var(--oy, 0%)); transition-duration: .4s, .55s, .55s, .55s; transition-timing-function: cubic-bezier(.5, 0, .75, 0), var(--ease), var(--ease), var(--ease); }
   .ipanel[data-theme="js"] { --ia: #7dd3fc; --ib: #6366f1; --ink: #03121c; }
   .ipanel[data-theme="pulley"] { --ia: #c4b5fd; --ib: #7c3aed; }
@@ -374,6 +376,11 @@
   .ibtn:active { transform: translateY(0) scale(.98); }
   .inote { color: var(--dim); font-size: 11.8px; margin: 8px 0 0; }
   .inote.warn { color: var(--amber); }
+  .unsup { border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line2)); background: rgba(255, 107, 107, .06); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .unsup b { color: var(--red); font-size: 13.5px; } .unsup p { margin: 4px 0 10px; color: #e3c9c9; font-size: 12.3px; }
+  .untested { border: 1px dashed var(--line2); border-radius: 11px; padding: 0 12px; }
+  .untested summary { cursor: pointer; padding: 10px 0; color: var(--dim); font-size: 12px; }
+  .untested[open] summary { margin-bottom: 4px; } .untested .methods { padding-bottom: 12px; }
   .irow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .ifam { display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; }
   .ifam a { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); }
@@ -541,7 +548,7 @@
             <tr><th>Type checking</th><td class="col-fw"><span class="yes">Yes</span></td><td class="col-js"><span class="no">No</span> — programs the compiler rejects may still run</td></tr>
             <tr><th>Files, network, processes, databases</th><td class="col-fw"><span class="yes">Yes</span> — fs, net, os, sqlite, HTTPS, threads</td><td class="col-js"><span class="no">No</span> — a browser-safe subset (<code>json.load</code> and <code>flywheel.run</code> work in Node)</td></tr>
             <tr><th>Native code imports</th><td class="col-fw"><span class="yes">Yes</span> — C, C++, Rust, Zig</td><td class="col-js"><span class="no">No</span> — raises a catchable <code>NativeError</code></td></tr>
-            <tr><th>Platforms</th><td class="col-fw">Linux, Windows (macOS not yet)</td><td class="col-js">Anywhere JavaScript runs</td></tr>
+            <tr><th>Platforms</th><td class="col-fw">Linux, Windows. <span class="no">macOS: not supported</span> (never tested)</td><td class="col-js">Anywhere JavaScript runs</td></tr>
           </tbody>
         </table>
       </div>
