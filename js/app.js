@@ -35,13 +35,12 @@ const INSTALL = {
     kind: "sh", label: "macOS", url: "install.sh", file: "install.sh",
     cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash",
     all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
-    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel',
-    run: "in a terminal",
-    note: "",
-    unsupported: true,
+    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" -DCMAKE_PREFIX_PATH="$(brew --prefix)"\ncmake --build build --parallel',
+    run: "in Terminal",
+    note: "Builds with Homebrew's LLVM 21–23, CMake and Ninja, and Apple's Command Line Tools; offers to install them first. No sudo needed.",
   },
 };
-// Flywheel Lite: the bytecode VM. It needs only a C compiler, so it installs quickly and runs on macOS.
+// Flywheel Lite: the bytecode VM. It needs only a C compiler, so it installs quickly.
 const LITE_SH = "curl -fsSL https://flywheel.polymorphia.dev/lite-install.sh | bash";
 const LITE_INSTALL = {
   linux: {
@@ -510,7 +509,6 @@ const term = (() => {
         if (a[0] === "js" || a[0] === "flywheel.js") { line(`<span class="o-dim">in your browser it is already here; in Node:</span>`); line(`  <span class="o-cyan">${esc(JS_INSTALL.npx)}</span>`); }
         else if (a[0] === "lite") { line(`<span class="o-dim">run this ${LITE_INSTALL[OS].run}:</span>`); line(`  <span class="o-acc">${esc(LITE_INSTALL[OS].cmd)}</span>`); }
         else {
-          if (!a[0] && OS === "macos") line(`<span class="o-err">macOS is not supported</span><span class="o-dim"> — Flywheel has never been tested there; it supports Linux and Windows. flywheel lite and flywheel.js work on a Mac (install lite).</span>`);
           line(`<span class="o-dim">run this ${it.run}:</span>`);
           line(`  <span class="o-acc">${esc(it.cmd)}</span>`);
         }
@@ -802,17 +800,13 @@ function paintInstall() {
     const it = INSTALL[dlgOs];
     COPY.one = it.cmd; COPY.all = it.all; COPY.src = it.src.replace(/\\n/g, "\n");
     const methods = `<div class="methods">
-        ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), !it.unsupported)}
+        ${method("One-line installer", it.kind === "ps1" ? "PowerShell" : "bash", cmdBox(it.cmd, "one"), true)}
         ${rawScript(it)}
         ${method("Everything", "Flywheel + Pulley (packages) + the VS Code extension", cmdBox(it.all, "all"))}
         ${method("From source", "CMake 3.24+, a C++20 compiler, LLVM 21–23", cmdBox(it.src.replace(/\\n/g, "\n"), "src"))}
       </div>`;
-    const body = it.unsupported
-      ? `<div class="unsup" role="alert"><b>macOS is not supported</b><p>Flywheel has never been built or tested on macOS, so there is no official install for it. It supports Linux and Windows.</p>
-           <div class="irow"><button class="btn ibtn" type="button" id="useLite">Use flywheel lite instead</button><button class="btn" type="button" id="useJs">Use flywheel.js</button><span class="inote" style="margin:0">Both run on a Mac today.</span></div></div>
-         <details class="untested"><summary>Try anyway (untested, unsupported)</summary><p class="inote warn">These are the Linux installer commands. They may fail, and problems on macOS won't be fixed.</p>${methods}</details>`
-      : methods + `<p class="inote">${esc(it.note)}</p>`;
-    html = `<h3>Install <em>flywheel</em></h3><p>${it.unsupported ? "Native compiler: Linux and Windows only." : `Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.`}</p>
+    const body = methods + `<p class="inote">${esc(it.note)}</p>`;
+    html = `<h3>Install <em>flywheel</em></h3><p>Run ${it.run}. Nothing is installed system-wide except build dependencies, which are listed and confirmed first.</p>
       ${osTabs(INSTALL)}
       ${body}`;
   } else if (pick === "lite") {
@@ -880,8 +874,6 @@ dlg.addEventListener("click", e => {
       () => getSelection().selectAllChildren(cp.previousElementSibling));
     return;
   }
-  if (t.closest("#useJs")) { choose("js"); return; }
-  if (t.closest("#useLite")) { choose("lite"); return; }
   if (t.closest("#jsPlay")) { closeInstall(); go("#/"); return; }
   if (t.closest("#jsLearn")) { closeInstall(); }
 });
