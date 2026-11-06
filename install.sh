@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Flywheel installer for Linux: builds and installs the Flywheel compiler, and optionally
-# Pulley (the package manager) and the VS Code extension.
+# Flywheel installer for Linux and macOS: builds and installs the Flywheel compiler, and
+# optionally Pulley (the package manager) and the VS Code extension.
 #
 #   curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash
 #   curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all
 #
 # Run with --help for options. Nothing is installed system-wide except the build dependencies
 # from your distribution's package manager, which are listed and confirmed before sudo is used.
+# On macOS they come from Homebrew (no sudo) and Apple's Command Line Tools.
 #
 # The whole script is inside functions and `main` runs on the last line, so a partially
 # downloaded copy does nothing.
@@ -47,7 +48,7 @@ keep_build=0
 
 usage() {
     cat <<EOF
-Install Flywheel on Linux.
+Install Flywheel on Linux or macOS.
 
 Usage: install.sh [options]
 
@@ -212,14 +213,34 @@ as_root() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# version_ge 3.28.1 3.24 -> true
-version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]; }
+# version_ge 3.28.1 3.24 -> true. Numeric dotted versions only; done in bash because the sort
+# on older macOS has no -V.
+version_ge() {
+    local IFS=. i a b
+    # shellcheck disable=SC2206
+    local x=($1) y=($2)
+    for ((i = 0; i < ${#x[@]} || i < ${#y[@]}; i++)); do
+        a="${x[i]:-0}" b="${y[i]:-0}"
+        a="${a%%[!0-9]*}" b="${b%%[!0-9]*}"
+        ((10#${a:-0} > 10#${b:-0})) && return 0
+        ((10#${a:-0} < 10#${b:-0})) && return 1
+    done
+    return 0
+}
+
+cpu_count() { nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2; }
 
 # ---------------------------------------------------------------------------------------------
-# Distribution and packages
+# Platform and packages
 
+os=""
 distro=""
-detect_distro() {
+detect_platform() {
+    case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=macos; distro=macos; return ;;
+    *) die "this installer is for Linux and macOS; on Windows use install.ps1" ;;
+    esac
     local id="" like=""
     if [[ -r /etc/os-release ]]; then
         # shellcheck disable=SC1091
@@ -257,6 +278,12 @@ packages_for() {
     fedora:desktop) echo "pkgconf gtk3-devel webkit2gtk4.1-devel" ;;
     fedora:pulley) echo "python3 pipx" ;;
     fedora:node) echo "nodejs npm" ;;
+    # Homebrew. curl, tar, zlib and the C++ compiler come with macOS and its Command Line Tools;
+    # LLVM has its own step (brew_llvm_formula) and desktop windows need nothing extra.
+    macos:build) echo "cmake ninja" ;;
+    macos:compress) echo "zstd" ;;
+    macos:pulley) echo "python@3.13 pipx" ;;
+    macos:node) echo "node" ;;
     esac
 }
 
@@ -289,6 +316,14 @@ install_packages() {
     if ((!install_deps)); then
         die "missing packages: ${packages[*]} (install them, or rerun without --no-deps)"
     fi
+    if [[ "$os" == macos ]]; then
+        find_brew
+        info "These packages will be installed with Homebrew:"
+        info "  ${packages[*]}"
+        ask "Install them now?" y || die "cannot continue without: ${packages[*]}"
+        run brew install "${packages[@]}"
+        return
+    fi
     info "These packages will be installed with your package manager:"
     info "  ${packages[*]}"
     ask "Install them now (uses sudo)?" y || die "cannot continue without: ${packages[*]}"
@@ -303,6 +338,57 @@ install_packages() {
         ;;
     fedora) as_root dnf install -y "${packages[@]}" ;;
     esac
+}
+
+# ---------------------------------------------------------------------------------------------
+# macOS: Command Line Tools and Homebrew
+
+# Homebrew lives in /opt/homebrew (Apple silicon) or /usr/local (Intel) and is not always on PATH
+# in a fresh shell; this puts it there for the rest of the script.
+brew_prefix=""
+brew_found() {
+    local candidate
+    for candidate in "$(command -v brew 2>/dev/null || true)" /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        eval "$("$candidate" shellenv 2>/dev/null)" || true
+        brew_prefix="$("$candidate" --prefix 2>/dev/null)" || continue
+        return 0
+    done
+    return 1
+}
+
+find_brew() {
+    [[ -n "$brew_prefix" ]] || brew_found ||
+        die "the build dependencies on macOS come from Homebrew, which was not found; install it" \
+            "from https://brew.sh (or install them yourself and rerun with --no-deps)"
+}
+
+# The C++ compiler and make come with Apple's Command Line Tools. Their installer is a GUI dialog
+# that runs on its own, so this starts it and asks you to rerun once it has finished.
+command_line_tools_ok() { xcode-select -p >/dev/null 2>&1 && c++ --version >/dev/null 2>&1; }
+
+install_command_line_tools() {
+    if ((!install_deps)); then
+        die "a C++ compiler and make are required (install Apple's Command Line Tools: xcode-select --install)"
+    fi
+    info "Flywheel needs a C++ compiler and make, which come with Apple's Command Line Tools."
+    ask "Open the Command Line Tools installer now?" y ||
+        die "a C++ compiler is required (install it with: xcode-select --install)"
+    run xcode-select --install || true
+    ((dry_run)) || die "finish the Command Line Tools installation in the window that opened, then rerun this installer"
+}
+
+# Homebrew's plain "llvm" formula is whatever LLVM is current, which can be newer than Flywheel
+# supports; then the versioned formula is used instead.
+brew_llvm_formula() {
+    local version major
+    version="$(brew info llvm 2>/dev/null | sed -n 's/^==> llvm: stable \([0-9][0-9.]*\).*/\1/p' | head -n1)"
+    major="${version%%.*}"
+    if [[ -n "$major" ]] && ((major >= LLVM_MIN && major <= LLVM_MAX)); then
+        echo llvm
+    else
+        echo "llvm@$LLVM_DEFAULT"
+    fi
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -366,8 +452,14 @@ llvm_config=""
 find_llvm() {
     local candidate version major
     llvm_config=""
-    for candidate in llvm-config llvm-config-{23,22,21} /usr/lib/llvm-{23,22,21}/bin/llvm-config \
-        /usr/lib/llvm{23,22,21}/bin/llvm-config; do
+    local candidates=(llvm-config llvm-config-{23,22,21} /usr/lib/llvm-{23,22,21}/bin/llvm-config
+        /usr/lib/llvm{23,22,21}/bin/llvm-config)
+    # Homebrew's LLVM is keg-only (not on PATH); MacPorts puts each version under libexec.
+    if [[ -n "$brew_prefix" ]]; then
+        candidates+=("$brew_prefix"/opt/llvm@{23,22,21}/bin/llvm-config "$brew_prefix/opt/llvm/bin/llvm-config")
+    fi
+    if [[ "$os" == macos ]]; then candidates+=(/opt/local/libexec/llvm-{23,22,21}/bin/llvm-config); fi
+    for candidate in "${candidates[@]}"; do
         have "$candidate" || [[ -x "$candidate" ]] || continue
         version="$("$candidate" --version 2>/dev/null)" || continue
         major="${version%%.*}"
@@ -399,11 +491,17 @@ install_llvm_debian() {
 # LLVM's CMake files link LLVMSupport against ZLIB::ZLIB and zstd, but only look for them quietly,
 # so missing headers surface later as "ZLIB::ZLIB but the target was not found".
 compress_present() {
-    local dir
-    for dir in /usr/include /usr/local/include; do
-        [[ -f "$dir/zlib.h" && -f "$dir/zstd.h" ]] && return 0
+    local dirs=(/usr/include /usr/local/include) dir zlib=0 zstd=0
+    if [[ "$os" == macos ]]; then
+        # zlib comes with the macOS SDK; zstd from Homebrew or MacPorts.
+        dirs+=("$(xcrun --show-sdk-path 2>/dev/null || echo /nonexistent)/usr/include" /opt/local/include)
+        if [[ -n "$brew_prefix" ]]; then dirs+=("$brew_prefix/include"); fi
+    fi
+    for dir in "${dirs[@]}"; do
+        [[ -f "$dir/zlib.h" ]] && zlib=1
+        [[ -f "$dir/zstd.h" ]] && zstd=1
     done
-    return 1
+    ((zlib && zstd))
 }
 
 webkit_present() {
@@ -418,6 +516,10 @@ webkit_present() {
 check_flywheel_deps() {
     step "Checking build tools"
     local missing=()
+    if [[ "$os" == macos ]]; then
+        command_line_tools_ok || install_command_line_tools
+        brew_found || true
+    fi
     have c++ || have g++ || have clang++ || missing+=(build)
     have make || have ninja || missing+=(build)
     have curl || have wget || missing+=(build)
@@ -437,6 +539,11 @@ check_flywheel_deps() {
     if ! find_llvm; then
         case "$distro" in
         debian) install_llvm_debian ;;
+        macos)
+            ((install_deps)) || die "LLVM $LLVM_MIN-$LLVM_MAX is required (e.g. brew install llvm@$LLVM_DEFAULT)"
+            find_brew
+            install_packages "$(brew_llvm_formula)"
+            ;;
         *) install_for llvm ;;
         esac
         find_llvm || ((dry_run)) ||
@@ -451,7 +558,11 @@ check_flywheel_deps() {
     fi
     ok "zlib and zstd"
 
-    if [[ "$desktop" != OFF ]]; then
+    if [[ "$os" == macos ]]; then
+        # The macOS desktop backend uses the system WebKit (WKWebView) through webview/webview,
+        # which the build downloads; there is nothing to install.
+        if [[ "$desktop" != OFF ]]; then ok "desktop windows (system WebKit)"; fi
+    elif [[ "$desktop" != OFF ]]; then
         if webkit_present; then
             ok "GTK and WebKitGTK (desktop windows)"
         elif [[ "$desktop" == ON ]] ||
@@ -476,19 +587,22 @@ install_flywheel() {
         step "Building Flywheel"
     fi
     build="$work/build"
-    local generator=()
-    have ninja && generator=(-G Ninja)
     local llvm_dir=""
     [[ -n "$llvm_config" ]] && llvm_dir="$("$llvm_config" --cmakedir)"
     info "This takes a few minutes; the first build also downloads SQLite and Mbed TLS."
-    local configure=(cmake -S "$src" -B "$build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release
-        "-DLLVM_DIR=$llvm_dir" "-DFLYWHEEL_DESKTOP=$desktop" -Wno-dev)
+    # (Arrays are only expanded when non-empty: bash 3.2, macOS's /bin/bash, treats an empty
+    # "${array[@]}" as unbound under set -u.)
+    local configure=(cmake -S "$src" -B "$build")
+    have ninja && configure+=(-G Ninja)
+    configure+=(-DCMAKE_BUILD_TYPE=Release "-DLLVM_DIR=$llvm_dir" "-DFLYWHEEL_DESKTOP=$desktop" -Wno-dev)
+    # LLVM's CMake files look for zstd, which Homebrew keeps outside CMake's default search path.
+    if [[ -n "$brew_prefix" ]]; then configure+=("-DCMAKE_PREFIX_PATH=$brew_prefix"); fi
     printf '    %s$ %s%s\n' "$dim" "${configure[*]}" "$reset"
     if ((!dry_run)) && ! "${configure[@]}" >"$work/configure.log" 2>&1; then
         tail -n 30 "$work/configure.log" >&2
         die "configuring Flywheel failed (log above)"
     fi
-    build_with_progress cmake --build "$build" --parallel "${jobs:-$(nproc 2>/dev/null || echo 2)}"
+    build_with_progress cmake --build "$build" --parallel "${jobs:-$(cpu_count)}"
     step "Installing Flywheel into $prefix"
     run cmake --install "$build" --prefix "$prefix" >/dev/null
     install_alias
@@ -554,7 +668,11 @@ shell_rc_files() {
     shell_name="$(basename "${SHELL:-bash}")"
     echo "$HOME/.profile" # login shells, and the desktop session on most distributions
     case "$shell_name" in
-    bash) echo "$HOME/.bashrc" ;;
+    bash)
+        echo "$HOME/.bashrc"
+        # macOS terminals start login shells, which read .bash_profile instead of .profile.
+        if [[ "$os" == macos ]]; then echo "$HOME/.bash_profile"; fi
+        ;;
     zsh) echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
     fish) echo "${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/flywheel.fish" ;;
     esac
@@ -658,13 +776,26 @@ install_pulley() {
 # VS Code extension
 
 vscode_cli() {
-    local candidate
+    local candidate app
     for candidate in code code-insiders codium code-oss; do
         if have "$candidate"; then
             echo "$candidate"
             return 0
         fi
     done
+    # On macOS the code command is only on PATH after "Shell Command: Install 'code' command";
+    # it is always inside the app bundle.
+    if [[ "$os" == macos ]]; then
+        for app in "/Applications/Visual Studio Code.app" "$HOME/Applications/Visual Studio Code.app" \
+            "/Applications/Visual Studio Code - Insiders.app" "/Applications/VSCodium.app"; do
+            for candidate in "$app"/Contents/Resources/app/bin/{code,code-insiders,codium}; do
+                if [[ -x "$candidate" ]]; then
+                    echo "$candidate"
+                    return 0
+                fi
+            done
+        done
+    fi
     return 1
 }
 
@@ -719,6 +850,7 @@ do_uninstall() {
     while read -r file; do remove_path_block "$file"; done < <(
         shell_rc_files
         echo "$HOME/.bashrc"
+        echo "$HOME/.bash_profile"
         echo "${ZDOTDIR:-$HOME}/.zshrc"
     )
     local fish="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/flywheel.fish"
@@ -756,11 +888,10 @@ choose_components() {
 
 main() {
     parse_args "$@"
-    [[ "$(uname -s)" == Linux ]] || die "this installer is for Linux; see INSTALLATION.md for Windows"
+    detect_platform
     if ((EUID == 0)) && [[ -z "${FLYWHEEL_PREFIX:-}" ]]; then
         warn "running as root installs Flywheel for root only; run as your own user instead"
     fi
-    detect_distro
 
     if ((uninstall)); then
         do_uninstall
@@ -802,7 +933,11 @@ main() {
         ;;
     esac
     if ((want_vscode)); then
-        info "VS Code started from your desktop picks up PATH after you log in again; or set"
+        if [[ "$os" == macos ]]; then
+            info "VS Code opened from the Dock or Finder does not read your shell's PATH; set"
+        else
+            info "VS Code started from your desktop picks up PATH after you log in again; or set"
+        fi
         info "\"flywheel.path\": \"$prefix/bin/flywheel\" in its settings."
     fi
     return 0
