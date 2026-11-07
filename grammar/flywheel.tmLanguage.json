@@ -20,6 +20,12 @@
           "include": "#declarations"
         },
         {
+          "include": "#unit-declarations"
+        },
+        {
+          "include": "#unit-types"
+        },
+        {
           "include": "#imports"
         },
         {
@@ -36,6 +42,9 @@
         },
         {
           "include": "#constants"
+        },
+        {
+          "include": "#quantities"
         },
         {
           "include": "#numbers"
@@ -471,8 +480,17 @@
       "name": "constant.numeric.flywheel"
     },
     "builtins": {
-      "match": "\\b(?:print|input|len|typeof|render)\\b",
-      "name": "support.function.builtin.flywheel"
+      "patterns": [
+        {
+          "match": "\\b(?:print|input|len|typeof|render)\\b",
+          "name": "support.function.builtin.flywheel"
+        },
+        {
+          "comment": "type(), unit(), and unitns() inspect values and quantities.",
+          "match": "\\b(?:type|unit|unitns)(?=\\s*\\()",
+          "name": "support.function.builtin.flywheel"
+        }
+      ]
     },
     "calls": {
       "patterns": [
@@ -1601,6 +1619,91 @@
           "name": "punctuation.separator.type.flywheel"
         }
       ]
+    },
+    "unit-declarations": {
+      "patterns": [
+        {
+          "comment": "unitns time: a unit namespace; its units apply to every numeric type.",
+          "match": "^\\s*(unitns)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "storage.type.unit.flywheel"
+            },
+            "2": {
+              "name": "entity.name.namespace.unit.flywheel"
+            }
+          }
+        },
+        {
+          "comment": "unit time.min = 60",
+          "match": "^\\s*(unit)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\.)([A-Za-z_][A-Za-z0-9_]*)(?=\\s*=)",
+          "captures": {
+            "1": {
+              "name": "storage.type.unit.flywheel"
+            },
+            "2": {
+              "name": "entity.name.namespace.unit.flywheel"
+            },
+            "3": {
+              "name": "punctuation.accessor.flywheel"
+            },
+            "4": {
+              "name": "entity.name.unit.flywheel"
+            }
+          }
+        },
+        {
+          "comment": "unitconv 1metric_length.m / 1time.s = 1metric_speed.mps",
+          "match": "^\\s*(unitconv)(?=\\s+[0-9])",
+          "captures": {
+            "1": {
+              "name": "storage.type.unit.flywheel"
+            }
+          }
+        }
+      ]
+    },
+    "unit-types": {
+      "comment": "int[time], u8[time], float[metric.length]: quantity types of a unit namespace (any numeric type).",
+      "match": "\\b(int|float|double|[iu](?:8|16|32|64))(\\[)\\s*(?:([A-Za-z_][A-Za-z0-9_]*)(\\.))?([A-Za-z_][A-Za-z0-9_]*)\\s*(\\])",
+      "captures": {
+        "1": {
+          "name": "support.type.flywheel"
+        },
+        "2": {
+          "name": "punctuation.definition.typeparameters.begin.flywheel"
+        },
+        "3": {
+          "name": "entity.name.namespace.flywheel"
+        },
+        "4": {
+          "name": "punctuation.accessor.flywheel"
+        },
+        "5": {
+          "name": "entity.name.namespace.unit.flywheel"
+        },
+        "6": {
+          "name": "punctuation.definition.typeparameters.end.flywheel"
+        }
+      }
+    },
+    "quantities": {
+      "comment": "A number directly followed by a unit is a quantity: 100m, 0.32km, 15time.s, 5eV (an exponent needs digits).",
+      "match": "(?<![\\w.])([0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?![0-9]|[eE][+-]?[0-9])(?!(?:and|or|not|in|is|as|then|do|else|end|which|with|returns|if|for|while|true|false|null)\\b)(?:([A-Za-z_][A-Za-z0-9_]*)(\\.))?([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.flywheel"
+        },
+        "2": {
+          "name": "entity.name.namespace.unit.flywheel"
+        },
+        "3": {
+          "name": "punctuation.accessor.flywheel"
+        },
+        "4": {
+          "name": "keyword.other.unit.flywheel"
+        }
+      }
     }
   }
 }

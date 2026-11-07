@@ -468,7 +468,7 @@ const term = (() => {
           line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, fmt, doc and lsp — </span><a href="#" data-install>install it</a>`);
           return;
         }
-        if (sub === "--version" || sub === "version") return text("flywheel 2.9 (beta-9) — flywheel.js, in your browser");
+        if (sub === "--version" || sub === "version") return text("flywheel 2.12 (beta-12) — flywheel.js 2.1 (beta-1), in your browser");
         if (sub === "repl") return startRepl();
         if (sub === "run" || sub === "check") {
           let code = ed.value;
@@ -582,7 +582,7 @@ const term = (() => {
   /* ---------- REPL */
   function startRepl() {
     repl = { buf: [] };
-    line(`<span class="o-vio">Flywheel 2.9 (beta-9) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
+    line(`<span class="o-vio">flywheel.js 2.1 (beta-1) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
     line(`<span class="o-dim">:show lists the session, :reset clears it, :quit (or Ctrl+D) leaves</span>`);
     replLog = [];
     setPs1(); render();

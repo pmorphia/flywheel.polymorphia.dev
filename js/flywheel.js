@@ -38,7 +38,7 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
  * ========================================================================================= */
 const KEYWORDS = new Set(("if then else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is inst " +
-  "attr super null true false defer private public readonly elements").split(" "));
+  "attr super null true false defer private public readonly elements which").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
   "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
 // a line ending in one of these continues onto the next line
@@ -111,7 +111,17 @@ function tokenize(S, start, stop) {
       const w = src.slice(i, j);
       push(KEYWORDS.has(w) ? "kw" : "id", w, i, j); i = j; continue;
     }
-    if (/[0-9]/.test(c)) { const j = lexNumber(S, i); push("num", parseNumber(S, src.slice(i, j), i), i, j); i = j; continue; }
+    if (/[0-9]/.test(c)) {
+      const j = lexNumber(S, i);
+      push("num", parseNumber(S, src.slice(i, j), i), i, j); i = j;
+      // a quantity literal: a unit right after the number, 100m, 0.32km (15time.s is a member)
+      if (isIdStart(src[i] || "")) {
+        let k = i + 1; while (k < src.length && isIdChar(src[k])) k++;
+        const w = src.slice(i, k);
+        if (!KEYWORDS.has(w) && !/^(returns|with)$/.test(w)) { last().unit = w; last().e = k; i = k; }
+      }
+      continue;
+    }
     if (c === '"') { const r = lexString(S, i, '"'); push("str", r.parts, i, r.end); i = r.end; continue; }
     if (c === "'") { const r = lexChar(S, i); push("char", r.v, i, r.end); i = r.end; continue; }
     let op = null;
@@ -290,6 +300,7 @@ const BIN = {
   "or": 1, "and": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "in": 4, "is": 4,
   "??": 5, "..": 6, "..<": 6, "+": 7, "-": 7, "*": 8, "/": 8, "//": 8, "%": 8, "as": 9,
 };
+const UNIT_NUMBERS = new Set("int float double i8 i16 i32 i64 u8 u16 u32 u64 f32 f64".split(" "));
 const PRIM_TYPES = new Set("int float double string bool char void element fragment i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 any".split(" "));
 const ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "//=", "%="]);
 
@@ -353,7 +364,7 @@ class Parser {
   /* ---------------- types */
   tryType() {
     const save = this.p;
-    try { const t = this.type(); return t; } catch (e) { if (e instanceof CompileError) { this.p = save; return null; } throw e; }
+    try { const t = this.type(); return t; } catch (e) { if (e instanceof CompileError && !e.fatal) { this.p = save; return null; } throw e; }
   }
   type() {
     let t;
@@ -379,6 +390,20 @@ class Parser {
       while (this.op(".") && this.is("id", undefined, 1)) { this.next(); name += "." + this.next().v; }
       t = { name };
       if (this.op("<") && !this.peek().sp) t.args = this.typeArgs();
+      // int[time], u8[time], float[metric.length]: a number in a unit namespace
+      if (PRIM_TYPES.has(name) && this.op("[") && this.is("id", undefined, 1) &&
+          (this.op("]", 2) || (this.op(".", 2) && this.is("id", undefined, 3) && this.op("]", 4)))) {
+        this.next();
+        let module = null, ns = this.name();
+        if (this.accept("op", ".")) { module = ns; ns = this.name(); }
+        this.next();
+        if (!UNIT_NUMBERS.has(name)) {
+          const e = this.err(`units apply only to numbers: ${name}[${ns}] is not a type; use a numeric type such as int[${ns}] or float[${ns}]`, tk);
+          e.fatal = true;
+          throw e;
+        }
+        t.unit = { ns, module, real: name === "float" || name === "double" || name === "f32" || name === "f64" };
+      }
     } else throw this.err("expected a type");
     for (;;) {
       if (this.op("[") && this.op("]", 1) && !this.peek().sp) { this.next(); this.next(); t = { arr: t }; continue; }
@@ -404,7 +429,7 @@ class Parser {
     }
     return names;
   }
-  typeLike(t) { return t.fn || t.tuple || t.arr || t.opt || t.args || PRIM_TYPES.has(t.name) || /^[A-Z]/.test(t.name.split(".").pop()) || t.name.includes("."); }
+  typeLike(t) { return t.fn || t.tuple || t.arr || t.opt || t.args || t.unit || PRIM_TYPES.has(t.name) || /^[A-Z]/.test(t.name.split(".").pop()) || t.name.includes("."); }
 
   /* ---------------- statements */
   statement() {
@@ -459,6 +484,41 @@ class Parser {
           const st = this.statement(); return { k: "Defer", body: [st] };
         }
       }
+    }
+    if (tk.t === "id" && tk.v === "unitns" && this.is("id", undefined, 1)) {
+      const t2 = this.peek(2);
+      if (t2.t === "nl" || t2.t === "eof" || (t2.t === "op" && t2.v === ";") || (t2.t === "kw" && t2.v === "for")) {
+        this.next(); const name = this.name();
+        if (this.kw("for")) throw this.err(`unitns takes only a name: write \`unitns ${name}\`; units apply to every numeric type`);
+        this.endStmt(); return { k: "UnitNs", name };
+      }
+    }
+    if (tk.t === "id" && tk.v === "unit" && this.is("id", undefined, 1) && this.op(".", 2) && this.is("id", undefined, 3) && this.op("=", 4)) {
+      this.next(); const ns = this.name(); this.next(); const unit = this.name(); this.next();
+      const number = () => {
+        const n = this.next();
+        if (n.t !== "num" || n.unit) throw this.err("a unit's factor is a positive number, such as unit time.min = 60 or unit time.ms = 1/1000", n);
+        return this.S.text.slice(n.s, n.e).replace(/_/g, "");
+      };
+      let factor = number();
+      if (this.accept("op", "/")) factor += "/" + number();
+      this.endStmt(); return { k: "UnitDecl", ns, unit, factor };
+    }
+    if (tk.t === "id" && tk.v === "unitconv" && this.is("num", undefined, 1)) {
+      this.next();
+      const quantity = () => {
+        const n = this.next();
+        if (n.t !== "num" || !n.unit || !this.op(".") || !this.is("id", undefined, 1))
+          throw this.err("unitconv relates quantities, such as unitconv 1metric_length.m / 1time.s = 1metric_speed.mps", n);
+        this.next();
+        return { amount: Number(typeof n.v === "object" ? n.v.d : n.v), ns: n.unit, unit: this.name() };
+      };
+      const a = quantity();
+      if (!this.op("*") && !this.op("/")) throw this.err("unitconv expects * or / between the first two quantities");
+      const op = this.next().v, b = quantity();
+      this.expect("op", "=");
+      const c = quantity();
+      this.endStmt(); return { k: "UnitConv", a, op, b, c, line: this.line(tk) };
     }
     if (tk.t === "id" && tk.v === "assert" && !this.is("op", "=", 1) && !this.is("op", ".", 1) && !this.eol1()) return this.assertStmt();
     // typed declaration: Type name [= value]
@@ -815,9 +875,31 @@ class Parser {
     }
     return false;
   }
-  expr(minPrec) { return this.infix(this.unary(), minPrec || 0); }
+  // `items which condition` keeps the items for which the condition holds. It binds looser than every
+  // other operator and chains left to right: `xs which > 1 which < 9`.
+  expr(minPrec) {
+    let e = this.infix(this.unary(), minPrec || 0);
+    while (!minPrec && this.peek().t === "kw" && this.peek().v === "which") e = this.which(e);
+    return e;
+  }
+  which(items) {
+    const tk = this.next(), line = this.line(tk), at = this.peek();
+    if (at.t === "nl" || at.t === "eof" || (at.t === "kw" && at.v === "which"))
+      throw this.err("'which' expects a condition, such as 'which .age >= 18' or 'which > 10'", at);
+    this.whichDepth = (this.whichDepth || 0) + 1;
+    let cond;
+    try { cond = this.infix(this.unary(), 0); } finally { this.whichDepth--; }
+    const params = [{ name: "$which", type: null, def: null }];
+    return { k: "Which", e: items, fn: { k: "Lambda", params, ret: null, body: [{ k: "Return", value: cond, line }], line }, line };
+  }
   unary() {
     const tk = this.peek();
+    if (this.whichDepth > 0) {
+      // inside a `which` condition, `.name` reads a member of the item, and a leading operator compares it
+      if (tk.t === "op" && tk.v === "." && this.peek(1).t === "id") return this.postfix({ k: "Ident", name: "$which", line: this.line(tk) });
+      if ((tk.t === "op" && ["==", "!=", "<", ">", "<=", ">=", "*", "/", "//", "%"].includes(tk.v)) || (tk.t === "kw" && (tk.v === "in" || tk.v === "is")))
+        return { k: "Ident", name: "$which", line: this.line(tk) };
+    }
     if (tk.t === "op" && (tk.v === "-" || tk.v === "+")) {
       this.next();
       const operand = this.infix(this.unary(), 9);
@@ -859,7 +941,9 @@ class Parser {
   primary() {
     const tk = this.next(), line = this.line(tk);
     switch (tk.t) {
-      case "num": return { k: "Lit", v: typeof tk.v === "object" ? tk.v.d : tk.v };
+      case "num":
+        if (tk.unit) return { k: "Qty", v: typeof tk.v === "object" ? tk.v.d : tk.v, unit: tk.unit, text: this.S.text.slice(tk.s, tk.e), line };
+        return { k: "Lit", v: typeof tk.v === "object" ? tk.v.d : tk.v };
       case "str": return this.strNode(tk.v);
       case "char": return { k: "Lit", v: tk.v };
       case "markup": return this.markup(tk.v);
@@ -1065,6 +1149,7 @@ function keyOf(v) {
   if (v instanceof FwChar) return "c" + v.cp;
   if (v instanceof EnumVal && !v.fields) return "e" + v.en.name + "." + v.member.index;
   if (v instanceof Tuple) return "t[" + v.items.map(keyOf).join(",") + "]";
+  if (v instanceof Quantity) return "q" + v.ns.id + ":" + (Number(v.amount) * v.ns.factors[v.unit].value).toPrecision(12);
   if (v instanceof Instance || v instanceof FwElement) { if (!v.__id) v.__id = ++keyOf.seq; return "o" + v.__id; }
   fail("ValueError", "value is not hashable");
 }
@@ -1193,6 +1278,111 @@ function escStr(s, q) {
 }
 
 /* =========================================================================================
+ * units: `unitns time`, `unit time.min = 60`, `unitconv 1length.m / 1time.s = 1speed.mps`,
+ * quantities such as 15s (they keep the unit they were written in), int[time] / float[time]
+ * types, and the metric, imperial, and time unit libraries. Units apply to every numeric type;
+ * mixing namespaces is checked when the operation runs.
+ * ========================================================================================= */
+const bgcd = (a, b) => { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) [a, b] = [b, a % b]; return a; };
+function ratio(num, den) { const g = bgcd(num, den) || 1n; num /= g; den /= g; return { num, den, value: Number(num) / Number(den) }; }
+function decimalRatio(text) {
+  if (/[eE]/.test(text)) { const x = Number(text); return { num: 0n, den: 0n, value: x, inexact: true }; }
+  const [whole, frac = ""] = text.split(".");
+  return ratio(BigInt(whole + frac || "0"), 10n ** BigInt(frac.length));
+}
+function divideRatio(a, b) {
+  if (a.inexact || b.inexact) return { value: a.value / b.value, inexact: true };
+  return ratio(a.num * b.den, a.den * b.num);
+}
+class UnitNs {
+  constructor(name, module) { this.name = name; this.module = module; this.units = []; this.factors = []; this.id = ++UnitNs.seq; this.visible = true; }
+  index(unit) { return this.units.indexOf(unit); }
+}
+UnitNs.seq = 0;
+class Quantity { constructor(ns, amount, unit) { this.ns = ns; this.amount = amount; this.unit = unit; } }
+// The unit declarations of the library modules (stdlib/fw/_time.fw, metric.fw, imperial.fw).
+const UNIT_LIBRARIES = {
+  time: { needs: [], src: `unitns time
+unit time.ns = 1/1000000000
+unit time.us = 1/1000000
+unit time.ms = 1/1000
+unit time.s = 1
+unit time.min = 60
+unit time.h = 3600
+unit time.d = 86400
+unit time.wk = 604800
+` },
+  metric: { needs: ["time"], src: `unitns length
+unit length.nm = 1/1000000000
+unit length.um = 1/1000000
+unit length.mm = 1/1000
+unit length.cm = 1/100
+unit length.dm = 1/10
+unit length.m = 1
+unit length.km = 1000
+unitns area
+unit area.mm2 = 1/1000000
+unit area.cm2 = 1/10000
+unit area.m2 = 1
+unit area.ha = 10000
+unit area.km2 = 1000000
+unitns volume
+unit volume.ml = 1/1000
+unit volume.cm3 = 1/1000
+unit volume.cl = 1/100
+unit volume.dl = 1/10
+unit volume.l = 1
+unit volume.dm3 = 1
+unit volume.m3 = 1000
+unitns weight
+unit weight.mg = 1/1000000
+unit weight.g = 1/1000
+unit weight.kg = 1
+unit weight.t = 1000
+unitns speed
+unit speed.mps = 1
+unit speed.kmph = 5/18
+unitconv 1length.m * 1length.m = 1area.m2
+unitconv 1area.m2 * 1length.m = 1volume.m3
+unitconv 1length.m / 1time.s = 1speed.mps
+` },
+  imperial: { needs: ["time"], src: `unitns length
+unit length.inch = 1/12
+unit length.ft = 1
+unit length.yd = 3
+unit length.ch = 66
+unit length.fur = 660
+unit length.mi = 5280
+unitns area
+unit area.sqin = 1/144
+unit area.sqft = 1
+unit area.sqyd = 9
+unit area.acre = 43560
+unit area.sqmi = 27878400
+unitns volume
+unit volume.floz = 1
+unit volume.gi = 5
+unit volume.pt = 20
+unit volume.qt = 40
+unit volume.gal = 160
+unit volume.cuin = 16.387064/28.4130625
+unit volume.cuft = 28316.846592/28.4130625
+unitns weight
+unit weight.oz = 1/16
+unit weight.lb = 1
+unit weight.st = 14
+unit weight.cwt = 112
+unit weight.ton = 2240
+unitns speed
+unit speed.fps = 1
+unit speed.mph = 22/15
+unitconv 1length.ft * 1length.ft = 1area.sqft
+unitconv 1area.sqft * 1length.ft = 1volume.cuft
+unitconv 1length.ft / 1time.s = 1speed.fps
+` },
+};
+
+/* =========================================================================================
  * scopes
  * ========================================================================================= */
 class Scope {
@@ -1290,6 +1480,8 @@ class Interp {
         case "Import": this.doImport(st, scope); break;
       }
     }
+    const unitDecls = stmts.filter(st => st.k === "UnitNs" || st.k === "UnitDecl" || st.k === "UnitConv");
+    if (unitDecls.length) this.declareUnits(unitDecls, null, true);
     for (const st of stmts) {
       if (st.k === "Interface") { const c = scope.get(st.name); c.ifaces = st.bases.map(b => this.typeRef(b, scope)).filter(Boolean); }
       if (st.k === "Class") this.buildClass(scope.get(st.name), st, scope);
@@ -1332,6 +1524,8 @@ class Interp {
     if (st.native) throw new FwThrow(new FwError("NativeError", `native imports (import ${st.native === "cxx" ? "c++" : st.native}) are not available in flywheel.js; install Flywheel to compile ${st.native === "cxx" ? "C++" : st.native === "c" ? "C" : st.native === "rust" ? "Rust" : "Zig"} code`));
     if (st.file) throw new FwThrow(new FwError("RuntimeError", `importing files and URLs ('${st.path}') is not available in flywheel.js; install Flywheel to use them`));
     const root = st.path.split(".")[0];
+    if (UNIT_LIBRARIES[root] && !st.wildcard) this.loadUnitLibrary(root, st.alias || root, true);
+    if (root === "metric" || root === "imperial") { scope.def(st.alias || root, new Module(root, new Map())); return; }
     const mod = this.modules[root];
     if (!mod) {
       const native = ["fs", "io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
@@ -1361,7 +1555,8 @@ class Interp {
     this.line = st.line || this.line;
     this.tick();
     switch (st.k) {
-      case "Nop": case "Func": case "Class": case "Interface": case "Enum": case "Component": case "Import": return;
+      case "Nop": case "Func": case "Class": case "Interface": case "Enum": case "Component": case "Import":
+      case "UnitNs": case "UnitDecl": case "UnitConv": return;
       case "Expr": this.evalExprStmt(st.e, scope); return;
       case "Var": {
         let v;
@@ -1640,6 +1835,16 @@ class Interp {
   coerce(v, t, scope) {
     if (!t || v === null) return v;
     if (t.opt) return this.coerce(v, t.opt, scope);
+    if (t.unit) {
+      const ns = this.typeUnitSpace(t.unit), spelled = `${t.unit.real ? "float" : "int"}[${ns.name}]`;
+      if (v instanceof Quantity) {
+        if (v.ns !== ns) fail("CastError", `cannot convert ${this.typeName(v)} to ${spelled}: they are in different unit namespaces`);
+        return t.unit.real && typeof v.amount === "bigint" ? new Quantity(v.ns, Number(v.amount), v.unit) : v;
+      }
+      if (isNum(v)) fail("CastError", `cannot use ${this.typeName(v)} as ${spelled}; give the number a unit, such as 5${ns.units[0]}`);
+    }
+    if (v instanceof Quantity && t.name && UNIT_NUMBERS.has(t.name))
+      fail("CastError", `cannot convert ${this.typeName(v)} to ${t.name}; use .value for the number, or \`in\` to change its unit`);
     if ((t.name === "double" || t.name === "float") && typeof v === "bigint") return Number(v);
     if (t.arr && Array.isArray(v) && t.arr.name && (t.arr.name === "double" || t.arr.name === "float")) {
       for (let i = 0; i < v.length; i++) if (typeof v[i] === "bigint") v[i] = Number(v[i]);
@@ -1651,6 +1856,7 @@ class Interp {
   eval(e, scope) {
     switch (e.k) {
       case "Lit": return e.v;
+      case "Qty": this.line = e.line || this.line; return this.quantityLiteral(e.v, e.unit, null, e.text);
       case "Str": {
         let s = "";
         for (const p of e.parts) {
@@ -1709,6 +1915,7 @@ class Interp {
         if (e.op === "+") return v;
         if (typeof v === "bigint") return ck(-v);
         if (typeof v === "number") return -v;
+        if (v instanceof Quantity) return new Quantity(v.ns, typeof v.amount === "bigint" ? ck(-v.amount) : -v.amount, v.unit);
         if (v instanceof Instance) { const m = findMethod(v.cls, "operator -"); if (m && m.params.length === 0) return this.call(new Bound(m, v), []); }
         fail("RuntimeError", `cannot negate ${this.typeName(v)}`);
       }
@@ -1727,6 +1934,12 @@ class Interp {
       }
       case "Bin": {
         if (e.op === "??") { const l = this.eval(e.l, scope); return l !== null ? l : this.eval(e.r, scope); }
+        if (e.op === "in") {           // `length in cm`: a quantity converted to another unit
+          const l = this.eval(e.l, scope);
+          this.line = e.line || this.line;
+          if (l instanceof Quantity) { const j = this.unitTarget(e.r, scope, l); if (j !== null) return this.unitConvert(l, j); }
+          return this.binary("in", l, this.eval(e.r, scope));
+        }
         const l = this.eval(e.l, scope), r = this.eval(e.r, scope);
         this.line = e.line || this.line;
         return this.binary(e.op, l, r);
@@ -1750,6 +1963,10 @@ class Interp {
         fail("CastError", `cannot cast ${this.typeName(v)} to ${this.typeStr(e.type)}`);
       }
       case "Member": {
+        if (e.e.k === "Qty") {          // 15time.s: a unit qualified by its namespace
+          const ns = this.unitSpace(e.e.unit, null);
+          if (ns && ns.index(e.name) >= 0) { this.line = e.line || this.line; return this.quantityLiteral(e.e.v, e.name, ns, e.e.text); }
+        }
         const obj = this.eval(e.e, scope);
         this.line = e.line || this.line;
         return this.member(obj, e.name);
@@ -1781,6 +1998,17 @@ class Interp {
       }
       case "Lambda": return new FwFunc("lambda", e.params, e.body, scope);
       case "JsonLit": return new JsonVal(JSON.parse(JSON.stringify(e.v)));
+      case "Which": {
+        const v = this.eval(e.e, scope);
+        const items = seqItems(v) || (v instanceof FwSet ? v.items() : null);
+        if (!items) fail("CastError", `'which' filters an array, tuple, or set, not ${this.typeName(v)}`);
+        const f = new FwFunc("lambda", e.fn.params, e.fn.body, scope);
+        return items.filter(x => {
+          const r = this.call(f, [x]);
+          if (typeof r !== "boolean") fail("CastError", `'which' condition must be bool, got ${this.typeName(r)}`);
+          return r;
+        });
+      }
       case "Markup": return this.evalMarkup(e, scope);
     }
     throw new Error("cannot evaluate " + e.k);
@@ -1799,6 +2027,7 @@ class Interp {
 
   /* ---------------- operators */
   binary(op, a, b) {
+    if ((a instanceof Quantity || b instanceof Quantity) && /^([+\-*/%]|\/\/|[=!<>]=|[<>])$/.test(op)) return this.unitBinary(op, a, b);
     if (a instanceof Instance && !(op === "==" || op === "!=") ) {
       const name = "operator " + (op === ">" || op === "<=" || op === ">=" ? op : op);
       let m = findMethod(a.cls, name);
@@ -1877,6 +2106,7 @@ class Interp {
   eq(a, b) {
     if (a === b) return true;
     if (a === null || b === null) return false;
+    if (a instanceof Quantity || b instanceof Quantity) return a instanceof Quantity && b instanceof Quantity && a.ns === b.ns && this.unitBinary("==", a, b);
     if (isNum(a) && isNum(b)) return a == b;   // eslint-disable-line eqeqeq
     if (a instanceof FwChar && b instanceof FwChar) return a.cp === b.cp;
     if (a instanceof EnumVal && b instanceof EnumVal) {
@@ -1901,6 +2131,7 @@ class Interp {
     return this.eq(a, b);
   }
   cmp(a, b) {
+    if (a instanceof Quantity && b instanceof Quantity) return this.unitBinary("<", a, b) ? -1 : this.unitBinary(">", a, b) ? 1 : 0;
     if (isNum(a) && isNum(b)) return a < b ? -1 : a > b ? 1 : 0;
     if (typeof a === "string" && typeof b === "string") { const x = cps(a), y = cps(b); for (let i = 0; i < Math.min(x.length, y.length); i++) { const d = x[i].codePointAt(0) - y[i].codePointAt(0); if (d) return d; } return x.length - y.length; }
     if (a instanceof FwChar && b instanceof FwChar) return a.cp - b.cp;
@@ -1986,6 +2217,10 @@ class Interp {
   }
   member(obj, name) {
     if (obj === null) fail("CastError", `member '${name}' of a null value`);
+    if (obj instanceof Quantity) {
+      if (name === "value") return obj.amount;
+      fail("RuntimeError", `${this.typeName(obj)} has no member '${name}'`);
+    }
     if (obj instanceof Instance) {
       if (obj.f.has(name)) return obj.f.get(name);
       const m = findMethod(obj.cls, name);
@@ -2190,6 +2425,7 @@ class Interp {
       case "boolean": return v ? "true" : "false";
     }
     if (v instanceof FwChar) return nested ? "'" + escStr(String(v), "'") + "'" : String(v);
+    if (v instanceof Quantity) return this.show(v.amount, false) + v.ns.units[v.unit];
     if (v instanceof FwElement) return this.render(v);
     if (v instanceof FwError) return v.message;
     if (v instanceof JsonVal) return JSON.stringify(v.v);
@@ -2226,6 +2462,7 @@ class Interp {
     if (v === null || v === undefined) return "null";
     switch (typeof v) { case "bigint": return "int"; case "number": return "double"; case "string": return "string"; case "boolean": return "bool"; }
     if (v instanceof FwChar) return "char";
+    if (v instanceof Quantity) return `${typeof v.amount === "bigint" ? "int" : "float"}[${v.ns.name}]`;
     if (Array.isArray(v)) return (v.length ? this.typeName(v[0]) : "int") + "[]";
     if (v instanceof Tuple) return "[" + v.items.map(x => this.typeName(x)).join(", ") + "]";
     if (v instanceof FwMap) { const e = [...v.m.values()][0]; return e ? `map<${this.typeName(e.k)},${this.typeName(e.v)}>` : "map"; }
@@ -2376,6 +2613,196 @@ class Interp {
     fail("JsonError", `cannot encode ${this.typeName(v)}`);
   }
 }
+/* ---------------- units (see the units section above) */
+Interp.prototype.unitState = function () {
+  if (!this._units) this._units = { spaces: [], relations: new Map(), libs: new Map() };
+  return this._units;
+};
+Interp.prototype.declareUnits = function (stmts, module, visible) {
+  const U = this.unitState(), own = [];
+  const err = (msg, st) => new CompileError(msg, (st && st.line) || this.line || 1, 1);
+  for (const st of stmts) if (st.k === "UnitNs") {
+    if (own.some(n => n.name === st.name)) throw err(`duplicate unit namespace '${st.name}'`, st);
+    const ns = new UnitNs(st.name, module); ns.visible = visible; own.push(ns);
+  }
+  for (const st of stmts) if (st.k === "UnitDecl") {
+    const ns = own.find(n => n.name === st.ns);
+    if (!ns) throw err(`unknown unit namespace '${st.ns}'; declare it first: unitns ${st.ns}`, st);
+    if (ns.index(st.unit) >= 0) throw err(`duplicate unit '${st.ns}.${st.unit}'`, st);
+    const parts = st.factor.split("/");
+    let f = decimalRatio(parts[0]);
+    if (parts[1]) f = divideRatio(f, decimalRatio(parts[1]));
+    if (!(f.value > 0) || !isFinite(f.value)) throw err("a unit's factor must be a positive number", st);
+    ns.units.push(st.unit); ns.factors.push(f);
+  }
+  for (const ns of own) if (!ns.units.length) throw err(`unit namespace '${ns.name}' has no units; add one, such as unit ${ns.name}.base = 1`);
+  U.spaces.push(...own);
+  for (const st of stmts) if (st.k === "UnitConv") {
+    const [a, b, c] = [st.a, st.b, st.c].map(x => {
+      const ns = own.find(n => n.name === x.ns) || U.spaces.filter(n => n.name === x.ns && (n.visible || n.module !== null)).pop();
+      if (!ns) throw err(`unknown unit namespace '${x.ns}'; declare it with unitns or import a module that declares it`, st);
+      const u = ns.index(x.unit);
+      if (u < 0) throw err(`unit namespace '${ns.name}' has no unit '${x.unit}'`, st);
+      if (!(x.amount > 0)) throw err("unitconv amounts must be positive", st);
+      return { ns, u, base: x.amount * ns.factors[u].value };
+    });
+    const k = st.op === "/" ? c.base / (a.base / b.base) : c.base / (a.base * b.base);
+    const add = (l, op, r, res, unit, kk, declared) => {
+      const key = l.id + op + r.id, old = U.relations.get(key);
+      if (old && old.declared && declared) throw err(`unitconv already relates ${l.name} ${op} ${r.name}`, st);
+      if (old && !declared) return;
+      U.relations.set(key, { ns: res, unit, k: kk, declared });
+    };
+    add(a.ns, st.op, b.ns, c.ns, c.u, k, true);
+    if (st.op === "/") {
+      add(c.ns, "*", b.ns, a.ns, a.u, 1 / k); add(b.ns, "*", c.ns, a.ns, a.u, 1 / k); add(a.ns, "/", c.ns, b.ns, b.u, k);
+    } else {
+      add(b.ns, "*", a.ns, c.ns, c.u, k); add(c.ns, "/", b.ns, a.ns, a.u, 1 / k); add(c.ns, "/", a.ns, b.ns, b.u, 1 / k);
+    }
+  }
+  return own;
+};
+// `import metric` / `imperial` / `time`: their namespaces become visible under the import's name.
+Interp.prototype.loadUnitLibrary = function (name, alias, visible) {
+  const U = this.unitState();
+  let spaces = U.libs.get(name);
+  if (!spaces) {
+    for (const need of UNIT_LIBRARIES[name].needs) this.loadUnitLibrary(need, need, false);
+    spaces = this.declareUnits(parse(UNIT_LIBRARIES[name].src, name + ".fw"), alias, visible);
+    U.libs.set(name, spaces);
+  } else if (visible) for (const ns of spaces) { ns.visible = true; ns.module = alias; }
+};
+// The visible namespace named `name` (qualified by `module`); the program's own come first.
+Interp.prototype.unitSpace = function (name, module) {
+  const all = this.unitState().spaces.filter(n => n.visible && n.name === name && (!module || n.module === module));
+  const own = all.filter(n => n.module === null);
+  const found = own.length ? own : all;
+  if (found.length > 1)
+    fail("CastError", `unit namespace '${name}' is ambiguous: modules ${found[0].module} and ${found[1].module} both declare it; qualify it, such as float[${found[0].module}.${name}]`);
+  return found[0] || null;
+};
+Interp.prototype.typeUnitSpace = function (u) {
+  const ns = this.unitSpace(u.ns, u.module);
+  if (!ns) fail("CastError", `unknown unit namespace '${u.ns}'; declare it with unitns ${u.ns} or import a module that declares it`);
+  return ns;
+};
+Interp.prototype.expectedUnit = function () {
+  let t = this.expectType;
+  while (t && (t.opt || t.arr)) t = t.opt || t.arr;
+  if (!t || !t.unit) return null;
+  return { ns: this.typeUnitSpace(t.unit), real: t.unit.real };
+};
+// 100m, 0.32km: the namespace comes from the declared type or the only visible one with the unit.
+Interp.prototype.quantityLiteral = function (amount, unit, ns, text) {
+  const wanted = this.expectedUnit();
+  if (!ns && wanted && wanted.ns.index(unit) >= 0) ns = wanted.ns;
+  if (!ns) {
+    const spaces = this.unitState().spaces;
+    let found = spaces.filter(n => n.visible && n.index(unit) >= 0);
+    const own = found.filter(n => n.module === null);
+    if (own.length) found = own;
+    if (!found.length) {
+      const hidden = spaces.find(n => n.index(unit) >= 0);
+      fail("CastError", `unknown unit '${unit}' after ${String(text).replace(/[A-Za-z_].*$/, "")}` +
+        (hidden ? `; import ${hidden.module}, which declares it` : spaces.length ? "" : "; declare units with unitns and unit, such as `unitns length` and `unit length.m = 1`, or import a unit library such as metric"));
+    }
+    if (found.length > 1) fail("CastError", `unit '${unit}' is ambiguous: ${found[0].name} and ${found[1].name} both have it`);
+    ns = found[0];
+  }
+  const real = typeof amount === "number" || (wanted && wanted.ns === ns && wanted.real);
+  return new Quantity(ns, real ? Number(amount) : amount, ns.index(unit));
+};
+Interp.prototype.unitRatio = function (q, j) {
+  const r = divideRatio(q.ns.factors[q.unit], q.ns.factors[j]);
+  return r;
+};
+Interp.prototype.unitReal = function (q, j) {
+  if (q.unit === j) return Number(q.amount);
+  const r = this.unitRatio(q, j);
+  return r.inexact ? Number(q.amount) * r.value : Number(q.amount) * Number(r.num) / Number(r.den);
+};
+Interp.prototype.unitWhole = function (q, j) {
+  if (q.unit === j) return true;
+  const r = this.unitRatio(q, j);
+  return !r.inexact && r.den === 1n;
+};
+Interp.prototype.unitExact = function (q, j) {
+  if (q.unit === j) return q.amount;
+  if (!this.unitWhole(q, j))
+    fail("ValueError", `${this.show(q)} is not a whole number of ${q.ns.units[j]}; use float[${q.ns.name}]`);
+  return ck(q.amount * this.unitRatio(q, j).num);
+};
+Interp.prototype.unitConvert = function (q, j) { return new Quantity(q.ns, this.unitReal(q, j), j); };
+// `x in cm`, `x in time.min`: the unit index, or null when the right side is an ordinary value.
+Interp.prototype.unitTarget = function (r, scope, q) {
+  let name = null, nsName = null;
+  if (r.k === "Ident" && !scope.lookup(r.name)) name = r.name;
+  else if (r.k === "Member" && r.e.k === "Ident") {
+    const v = scope.lookup(r.e.name) ? scope.get(r.e.name) : undefined;
+    if (v === undefined || v instanceof Module) { name = r.name; nsName = r.e.name; }
+  }
+  if (name === null) return null;
+  if (nsName === null || nsName === q.ns.name) {
+    const j = q.ns.index(name);
+    if (j >= 0) return j;
+  }
+  const other = this.unitState().spaces.find(n => n.visible && n !== q.ns && n.index(name) >= 0 && (!nsName || n.name === nsName));
+  if (other) fail("CastError", `cannot convert ${this.typeName(q)} to ${name}: ${name} is a unit of ${other.name}`);
+  if (nsName) fail("CastError", `unit namespace '${nsName}' has no unit '${name}'`);
+  return null;
+};
+Interp.prototype.unitBinary = function (op, a, b) {
+  const qa = a instanceof Quantity, qb = b instanceof Quantity;
+  if (!qa && !qb) return undefined;
+  const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(op);
+  const verdict = c => op === "==" ? c === 0 : op === "!=" ? c !== 0 : op === "<" ? c < 0 : op === "<=" ? c <= 0 : op === ">" ? c > 0 : c >= 0;
+  const both = `${this.typeName(a)} and ${this.typeName(b)}`;
+  if (qa && qb) {
+    if (a.ns === b.ns && (op === "+" || op === "-" || op === "/" || comparison)) {
+      const j = a.ns.factors[a.unit].value <= b.ns.factors[b.unit].value ? a.unit : b.unit;
+      if (op === "/") return this.unitReal(a, j) / this.unitReal(b, j);
+      const ints = typeof a.amount === "bigint" && typeof b.amount === "bigint";
+      if (op === "+" || op === "-") {
+        if (ints) { const x = this.unitExact(a, j), y = this.unitExact(b, j); return new Quantity(a.ns, ck(op === "+" ? x + y : x - y), j); }
+        const x = this.unitReal(a, j), y = this.unitReal(b, j);
+        return new Quantity(a.ns, op === "+" ? x + y : x - y, j);
+      }
+      let x, y;
+      if (ints && this.unitWhole(a, j) && this.unitWhole(b, j)) { x = this.unitExact(a, j); y = this.unitExact(b, j); }
+      else { x = this.unitReal(a, j); y = this.unitReal(b, j); }
+      return verdict(x < y ? -1 : x > y ? 1 : 0);
+    }
+    if (op === "==" || op === "!=") return op === "!=";
+    if (op === "*" || op === "/") {
+      const R = this.unitState().relations;
+      let rel = R.get(a.ns.id + op + b.ns.id), x = a, y = b;
+      if (!rel && op === "*" && (rel = R.get(b.ns.id + "*" + a.ns.id))) { x = b; y = a; }
+      if (!rel) fail("CastError", `no unitconv relates ${a.ns.name} ${op} ${b.ns.name}; declare one, such as unitconv 1${a.ns.name}.${a.ns.units[0]} ${op} 1${b.ns.name}.${b.ns.units[0]} = 1other.unit`);
+      const bx = Number(x.amount) * x.ns.factors[x.unit].value, by = Number(y.amount) * y.ns.factors[y.unit].value;
+      return new Quantity(rel.ns, (op === "*" ? bx * by : bx / by) * rel.k / rel.ns.factors[rel.unit].value, rel.unit);
+    }
+    if (a.ns !== b.ns) fail("CastError", `cannot use ${op} on ${both}: they are in different unit namespaces`);
+    fail("CastError", `operator ${op} is not defined for quantities; use + - * / and comparisons`);
+  }
+  const q = qa ? a : b, n = qa ? b : a;
+  if (!isNum(n)) {
+    if (op === "==" || op === "!=") return op === "!=";
+    fail("CastError", `cannot use ${op} on ${both}`);
+  }
+  if (op === "*") {
+    if (typeof q.amount === "bigint" && typeof n === "bigint") return new Quantity(q.ns, ck(q.amount * n), q.unit);
+    return new Quantity(q.ns, Number(q.amount) * Number(n), q.unit);
+  }
+  if (qa && op === "/") return new Quantity(q.ns, Number(q.amount) / Number(n), q.unit);
+  if (qa && op === "//") {
+    if (typeof q.amount !== "bigint" || typeof n !== "bigint") fail("CastError", `// divides an int quantity by an int; use / for ${both}`);
+    return new Quantity(q.ns, this.arith("//", q.amount, n), q.unit);
+  }
+  if (op === "+" || op === "-" || comparison)
+    fail("CastError", `cannot use ${op} on ${both}; give the number a unit, such as ${typeof n === "number" ? "1.5" : "5"}${q.ns.units[0]}`);
+  fail("CastError", `cannot use ${op} on ${both}`);
+};
+
 class ExitSig { constructor(code) { this.code = code; } }
 class StepLimit {}
 
@@ -2505,6 +2932,10 @@ Interp.prototype.installBuiltins = function () {
   N("input", args => { if (args.length) I.out(I.show(args[0], false)); return I.stdin && I.stdin.length ? I.stdin.shift() : null; });
   N("len", ([v]) => { const p = I.props(v, "length"); if (p === undefined) fail("RuntimeError", `len() of ${I.typeName(v)}`); return p; });
   N("typeof", ([v]) => I.typeName(v));
+  // type(x) names a value's type (a quantity's number type); unit(x) and unitns(x) a quantity's unit and namespace
+  N("type", ([v]) => v instanceof Quantity ? (typeof v.amount === "bigint" ? "int" : "float") : I.typeName(v));
+  N("unit", ([v]) => { if (!(v instanceof Quantity)) fail("CastError", `unit(x) needs a quantity such as 15s, got ${I.typeName(v)}`); return v.ns.units[v.unit]; });
+  N("unitns", ([v]) => { if (!(v instanceof Quantity)) fail("CastError", `unitns(x) needs a quantity such as 15s, got ${I.typeName(v)}`); return v.ns.name; });
   for (const t of ["int", "double", "float", "string", "bool", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"]) N(t, ([v]) => I.convert(t, v));
   N("array", ([v]) => v === undefined ? [] : I.toItems(v), (targs, [v]) => v === undefined ? [] : I.castTo({ name: "array", args: targs }, v));
   N("tuple", ([v]) => v === undefined ? new Tuple([]) : new Tuple(I.toItems(v)), (targs, [v]) => I.castTo({ name: "tuple", args: targs }, v === undefined ? [] : v));
@@ -2950,7 +3381,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.9 (beta-9) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.1 (beta-1) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);
