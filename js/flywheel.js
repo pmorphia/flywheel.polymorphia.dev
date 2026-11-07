@@ -511,10 +511,17 @@ class Parser {
         if (n.t !== "num" || !n.unit || !this.op(".") || !this.is("id", undefined, 1))
           throw this.err("unitconv relates quantities, such as unitconv 1metric_length.m / 1time.s = 1metric_speed.mps", n);
         this.next();
-        return { amount: Number(typeof n.v === "object" ? n.v.d : n.v), ns: n.unit, unit: this.name() };
+        let ns = n.unit, unit = this.name();
+        // 0.3048metric.length.m: a namespace of an imported module
+        if (this.op(".") && this.is("id", undefined, 1)) { this.next(); ns += "." + unit; unit = this.name(); }
+        return { amount: Number(typeof n.v === "object" ? n.v.d : n.v), ns, unit };
       };
       const a = quantity();
-      if (!this.op("*") && !this.op("/")) throw this.err("unitconv expects * or / between the first two quantities");
+      if (this.accept("op", "=")) {       // unitconv 1length.ft = 0.3048metric.length.m
+        const b = quantity();
+        this.endStmt(); return { k: "UnitConv", a, op: "=", b, line: this.line(tk) };
+      }
+      if (!this.op("*") && !this.op("/")) throw this.err("unitconv expects * or /, or = to relate two namespaces that measure the same thing");
       const op = this.next().v, b = quantity();
       this.expect("op", "=");
       const c = quantity();
@@ -1346,7 +1353,7 @@ unitconv 1length.m * 1length.m = 1area.m2
 unitconv 1area.m2 * 1length.m = 1volume.m3
 unitconv 1length.m / 1time.s = 1speed.mps
 ` },
-  imperial: { needs: ["time"], src: `unitns length
+  imperial: { needs: ["metric", "time"], src: `unitns length
 unit length.inch = 1/12
 unit length.ft = 1
 unit length.yd = 3
@@ -1379,6 +1386,11 @@ unit speed.mph = 22/15
 unitconv 1length.ft * 1length.ft = 1area.sqft
 unitconv 1area.sqft * 1length.ft = 1volume.cuft
 unitconv 1length.ft / 1time.s = 1speed.fps
+unitconv 1length.ft = 0.3048metric.length.m
+unitconv 1area.sqft = 0.09290304metric.area.m2
+unitconv 1volume.floz = 28.4130625metric.volume.ml
+unitconv 1weight.lb = 0.45359237metric.weight.kg
+unitconv 1speed.fps = 0.3048metric.speed.mps
 ` },
 };
 
@@ -1937,7 +1949,10 @@ class Interp {
         if (e.op === "in") {           // `length in cm`: a quantity converted to another unit
           const l = this.eval(e.l, scope);
           this.line = e.line || this.line;
-          if (l instanceof Quantity) { const j = this.unitTarget(e.r, scope, l); if (j !== null) return this.unitConvert(l, j); }
+          if (l instanceof Quantity) {
+            const target = this.unitTarget(e.r, scope, l);
+            if (target !== null) return target.ns === l.ns ? this.unitConvert(l, target.j) : this.unitAcross(l, target.ns, target.j);
+          }
           return this.binary("in", l, this.eval(e.r, scope));
         }
         const l = this.eval(e.l, scope), r = this.eval(e.r, scope);
@@ -2106,7 +2121,9 @@ class Interp {
   eq(a, b) {
     if (a === b) return true;
     if (a === null || b === null) return false;
-    if (a instanceof Quantity || b instanceof Quantity) return a instanceof Quantity && b instanceof Quantity && a.ns === b.ns && this.unitBinary("==", a, b);
+    if (a instanceof Quantity || b instanceof Quantity)
+      return a instanceof Quantity && b instanceof Quantity &&
+        (a.ns === b.ns || this.unitState().equiv.has(b.ns.id + "=" + a.ns.id)) && this.unitBinary("==", a, b);
     if (isNum(a) && isNum(b)) return a == b;   // eslint-disable-line eqeqeq
     if (a instanceof FwChar && b instanceof FwChar) return a.cp === b.cp;
     if (a instanceof EnumVal && b instanceof EnumVal) {
@@ -2615,7 +2632,7 @@ class Interp {
 }
 /* ---------------- units (see the units section above) */
 Interp.prototype.unitState = function () {
-  if (!this._units) this._units = { spaces: [], relations: new Map(), libs: new Map() };
+  if (!this._units) this._units = { spaces: [], relations: new Map(), libs: new Map(), equiv: new Map() };
   return this._units;
 };
 Interp.prototype.declareUnits = function (stmts, module, visible) {
@@ -2637,7 +2654,27 @@ Interp.prototype.declareUnits = function (stmts, module, visible) {
   }
   for (const ns of own) if (!ns.units.length) throw err(`unit namespace '${ns.name}' has no units; add one, such as unit ${ns.name}.base = 1`);
   U.spaces.push(...own);
-  for (const st of stmts) if (st.k === "UnitConv") {
+  // `unitconv 1length.ft = 0.3048metric.length.m`: two namespaces that measure the same thing
+  for (const st of stmts) if (st.k === "UnitConv" && st.op === "=") {
+    const [a, b] = [st.a, st.b].map(x => {
+      const dot = x.ns.indexOf(".");
+      const ns = dot < 0 ? own.find(n => n.name === x.ns) || U.spaces.filter(n => n.name === x.ns && n.module !== module).pop()
+        : U.spaces.filter(n => n.module === x.ns.slice(0, dot) && n.name === x.ns.slice(dot + 1)).pop();
+      if (!ns) throw err(`unknown unit namespace '${x.ns}'; declare it with unitns or import a module that declares it`, st);
+      const u = ns.index(x.unit);
+      if (u < 0) throw err(`unit namespace '${ns.name}' has no unit '${x.unit}'`, st);
+      if (!(x.amount > 0)) throw err("unitconv amounts must be positive", st);
+      return { ns, base: x.amount * ns.factors[u].value };
+    });
+    if (a.ns === b.ns) throw err("unitconv = relates two different namespaces", st);
+    if (!own.includes(a.ns) && !own.includes(b.ns)) throw err("unitconv relates namespaces of other modules; relate them in a module that declares one of them", st);
+    if (U.equiv.has(a.ns.id + "=" + b.ns.id)) throw err(`unitconv already relates ${st.a.ns} and ${st.b.ns}`, st);
+    // b's base = a's base * k; the other way divides by k, as the compiler's methods do
+    const k = b.base / a.base;
+    U.equiv.set(a.ns.id + "=" + b.ns.id, x => x * k);
+    U.equiv.set(b.ns.id + "=" + a.ns.id, x => x / k);
+  }
+  for (const st of stmts) if (st.k === "UnitConv" && st.op !== "=") {
     const [a, b, c] = [st.a, st.b, st.c].map(x => {
       const ns = own.find(n => n.name === x.ns) || U.spaces.filter(n => n.name === x.ns && (n.visible || n.module !== null)).pop();
       if (!ns) throw err(`unknown unit namespace '${x.ns}'; declare it with unitns or import a module that declares it`, st);
@@ -2733,6 +2770,12 @@ Interp.prototype.unitExact = function (q, j) {
   return ck(q.amount * this.unitRatio(q, j).num);
 };
 Interp.prototype.unitConvert = function (q, j) { return new Quantity(q.ns, this.unitReal(q, j), j); };
+// `q` in namespace `ns`, unit `j`, through a `unitconv A = B`; null when none relates them.
+Interp.prototype.unitAcross = function (q, ns, j) {
+  const across = this.unitState().equiv.get(q.ns.id + "=" + ns.id);
+  if (across === undefined) return null;
+  return new Quantity(ns, across(Number(q.amount) * q.ns.factors[q.unit].value) / ns.factors[j].value, j);
+};
 // `x in cm`, `x in time.min`: the unit index, or null when the right side is an ordinary value.
 Interp.prototype.unitTarget = function (r, scope, q) {
   let name = null, nsName = null;
@@ -2744,9 +2787,12 @@ Interp.prototype.unitTarget = function (r, scope, q) {
   if (name === null) return null;
   if (nsName === null || nsName === q.ns.name) {
     const j = q.ns.index(name);
-    if (j >= 0) return j;
+    if (j >= 0) return { ns: q.ns, j };
   }
-  const other = this.unitState().spaces.find(n => n.visible && n !== q.ns && n.index(name) >= 0 && (!nsName || n.name === nsName));
+  const candidates = this.unitState().spaces.filter(n => n.visible && n !== q.ns && n.index(name) >= 0 && (!nsName || n.name === nsName));
+  const related = candidates.find(n => this.unitState().equiv.has(q.ns.id + "=" + n.id));
+  if (related) return { ns: related, j: related.index(name) };     // 1m in ft
+  const other = candidates[0];
   if (other) fail("CastError", `cannot convert ${this.typeName(q)} to ${name}: ${name} is a unit of ${other.name}`);
   if (nsName) fail("CastError", `unit namespace '${nsName}' has no unit '${name}'`);
   return null;
@@ -2758,6 +2804,11 @@ Interp.prototype.unitBinary = function (op, a, b) {
   const verdict = c => op === "==" ? c === 0 : op === "!=" ? c !== 0 : op === "<" ? c < 0 : op === "<=" ? c <= 0 : op === ">" ? c > 0 : c >= 0;
   const both = `${this.typeName(a)} and ${this.typeName(b)}`;
   if (qa && qb) {
+    // 1m + 1ft: the second value in the first one's unit, through `unitconv A = B`
+    if (a.ns !== b.ns && (op === "+" || op === "-" || op === "/" || comparison)) {
+      const converted = this.unitAcross(b, a.ns, a.unit);
+      if (converted) return this.unitBinary(op, new Quantity(a.ns, Number(a.amount), a.unit), converted);
+    }
     if (a.ns === b.ns && (op === "+" || op === "-" || op === "/" || comparison)) {
       const j = a.ns.factors[a.unit].value <= b.ns.factors[b.unit].value ? a.unit : b.unit;
       if (op === "/") return this.unitReal(a, j) / this.unitReal(b, j);
