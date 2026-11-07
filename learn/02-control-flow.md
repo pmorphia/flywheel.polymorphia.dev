@@ -28,6 +28,26 @@ for index, word in ["zero", "one", "two"] do
 end
 ```
 
+## One-call bodies with run
+
+When a branch or loop body is a single function call, write it after `run` instead of `then`/`do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`.
+
+```flywheel
+function greet(string size)
+    print "a {size} number"
+end
+
+for n in [5, 50, 500] do
+    if n > 100 run greet("big")
+    else if n > 10 run greet("medium")
+    else run greet("small")
+end
+
+var queue = ["a", "b"]
+while queue.length > 0 run print "took", queue.pop()
+for word in ["one", "two"] run print word
+```
+
 ## Ranges and loops
 
 `a..b` includes `b`; `a..<b` stops before it. `break` and `continue` work in every loop.

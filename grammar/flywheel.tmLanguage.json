@@ -438,6 +438,11 @@
           "name": "keyword.control.flywheel"
         },
         {
+          "comment": "`run` (a soft keyword) introduces a one-call body: `if x run f()`, `else run g()`, `for i in xs run f(i)`. As a name (`run()`, `os.run`, `run = 1`) it stays an identifier.",
+          "match": "(?<![\\w.])run\\b(?=[ \\t]+(?:[A-Za-z_(]|\\[|\\{|\\\"|'))(?![ \\t]+(?:and|or|not|in|is|as|then|do|else|end)\\b)",
+          "name": "keyword.control.flywheel"
+        },
+        {
           "match": "\\b(?:and|or|not)\\b",
           "name": "keyword.operator.logical.flywheel"
         },

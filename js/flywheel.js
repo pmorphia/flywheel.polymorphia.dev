@@ -702,24 +702,71 @@ class Parser {
     this.endStmt();
     return { k: "Var", name, type, value, isConst };
   }
+  // `run` (a soft keyword) introduces a one-call body: `if/while/for ... run call`, no `end`.
+  runs() { if (!this.is("id", "run")) return false; this.next(); return true; }
+  runBody() {
+    const tk = this.peek(), usage = "'run' expects a function call, such as 'run greet()'";
+    if (this.eol()) throw this.err(usage, tk);
+    if (tk.t === "kw" && !/^(inst|super|attr)$/.test(tk.v) && !(tk.v === "function" && this.op("(", 1)))
+      throw this.err(`${usage}, not '${tk.v}'`, tk);
+    const e = this.outerExpr();
+    if (this.is("op") && ASSIGN_OPS.has(this.peek().v)) throw this.err(`${usage}; assignments need 'then' or 'do' ... 'end'`);
+    if (e.k !== "Call") throw this.err(usage, tk);
+    return [{ k: "Expr", e, line: this.line(tk) }];
+  }
+  // `if condition run call`; the chain continues with `else run call` or `else if condition run
+  // call`, on the same line or the next. Any other `else` belongs to an enclosing `if ... then`.
+  runIf(branches, cond) {
+    branches.push({ cond, body: this.runBody() });
+    let otherwise = null;
+    for (;;) {
+      const save = this.p;
+      while (this.is("nl") || this.op(";")) this.next();
+      if (this.kw("else")) {
+        const elsePos = this.p;
+        this.next();
+        if (this.runs()) { otherwise = this.runBody(); this.endStmt(); break; }
+        if (this.kw("if")) {
+          this.next();
+          let chained = false;
+          const ifPos = this.p;
+          try { this.expr(); chained = this.is("id", "run"); } catch (e) { if (!(e instanceof CompileError)) throw e; }
+          this.p = ifPos;
+          if (chained) { const c = this.expr(); this.next(); branches.push({ cond: c, body: this.runBody() }); continue; }
+        }
+        this.p = elsePos;
+      }
+      this.p = save; this.endStmt(); break;
+    }
+    return { k: "If", branches, otherwise };
+  }
   ifStmt() {
     this.next();
     const branches = [];
-    let cond = this.expr(); this.expect("kw", "then");
+    let cond = this.expr();
+    if (this.runs()) return this.runIf(branches, cond);
+    this.expect("kw", "then");
     let body = this.block(["else", "end"]);
     branches.push({ cond, body });
     let otherwise = null;
     while (this.accept("kw", "else")) {
       if (this.accept("kw", "if")) {
-        cond = this.expr(); this.expect("kw", "then");
+        cond = this.expr();
+        if (this.runs()) { const rest = this.runIf(branches, cond); return rest; }
+        this.expect("kw", "then");
         branches.push({ cond, body: this.block(["else", "end"]) });
+      } else if (this.runs()) {
+        otherwise = this.runBody(); this.endStmt();
+        return { k: "If", branches, otherwise };
       } else { otherwise = this.block(["end"]); break; }
     }
     this.expect("kw", "end"); this.endStmt();
     return { k: "If", branches, otherwise };
   }
   whileStmt() {
-    this.next(); const cond = this.expr(); this.expect("kw", "do");
+    this.next(); const cond = this.expr();
+    if (this.runs()) { const body = this.runBody(); this.endStmt(); return { k: "While", cond, body }; }
+    this.expect("kw", "do");
     const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt();
     return { k: "While", cond, body };
   }
@@ -728,7 +775,9 @@ class Parser {
     const names = [this.name()];
     if (this.accept("op", ",")) names.push(this.name());
     this.expect("kw", "in");
-    const iter = this.expr(); this.expect("kw", "do");
+    const iter = this.expr();
+    if (this.runs()) { const body = this.runBody(); this.endStmt(); return { k: "For", names, iter, body }; }
+    this.expect("kw", "do");
     const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt();
     return { k: "For", names, iter, body };
   }
