@@ -23,6 +23,9 @@
           "include": "#imports"
         },
         {
+          "include": "#adjacent-type-arguments"
+        },
+        {
           "include": "#generic-types"
         },
         {
@@ -154,6 +157,9 @@
         },
         {
           "include": "#imports"
+        },
+        {
+          "include": "#adjacent-type-arguments"
         },
         {
           "include": "#generic-types"
@@ -391,6 +397,9 @@
       },
       "patterns": [
         {
+          "include": "#adjacent-type-arguments"
+        },
+        {
           "include": "#generic-types"
         },
         {
@@ -588,7 +597,7 @@
     },
     "element": {
       "name": "meta.element.flywheel",
-      "begin": "(?=<(?!(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))([A-Za-z_][A-Za-z0-9_.:-]*)(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
+      "begin": "(?<![A-Za-z0-9_])(?=<(?!(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))([A-Za-z_][A-Za-z0-9_.:-]*)(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
       "end": "(/>)|(</)(\\1)(\\s*)(>)",
       "endCaptures": {
         "1": {
@@ -615,7 +624,7 @@
     },
     "void-element": {
       "name": "meta.element.flywheel",
-      "begin": "(?=<((?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
+      "begin": "(?<![A-Za-z0-9_])(?=<((?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(?![A-Za-z0-9_.:-]))(?:\\s*/?>|\\s+[A-Za-z_][A-Za-z0-9_.:-]*(?:\\s+[A-Za-z_][A-Za-z0-9_.:-]*)*(?:\\s*=(?!=)|\\s*/>|>)))",
       "end": "/?>",
       "endCaptures": {
         "0": {
@@ -1549,6 +1558,47 @@
         {
           "match": "[A-Za-z_$][A-Za-z0-9_$]*",
           "name": "variable.other.readwrite.js.flywheel"
+        }
+      ]
+    },
+    "adjacent-type-arguments": {
+      "comment": "`<` directly after an identifier opens type arguments, never markup (class Box<T>, first<T is comparable>, Box<U>(x), map<string, Box<int>>). With a space, `a <b` stays a comparison or markup.",
+      "name": "meta.type.parameters.flywheel",
+      "begin": "(?<=[A-Za-z0-9_])(<)(?=[A-Za-z_][A-Za-z0-9_.,?\\s\\[\\]()<>]*>)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.typeparameters.begin.flywheel"
+        }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.typeparameters.end.flywheel"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#adjacent-type-arguments"
+        },
+        {
+          "include": "#generic-types"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "entity.name.type.flywheel"
+        },
+        {
+          "match": "[\\[\\](),?.]",
+          "name": "punctuation.separator.type.flywheel"
         }
       ]
     }
