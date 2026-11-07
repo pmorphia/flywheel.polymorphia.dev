@@ -429,7 +429,7 @@ class Parser {
     }
     return names;
   }
-  typeLike(t) { return t.fn || t.tuple || t.arr || t.opt || t.args || t.unit || PRIM_TYPES.has(t.name) || /^[A-Z]/.test(t.name.split(".").pop()) || t.name.includes("."); }
+  typeLike(t) { return t.fn || t.tuple || t.arr || t.opt || t.args || t.unit || PRIM_TYPES.has(t.name) || /^[A-Z]/.test(t.name.split(".").pop()); }
 
   /* ---------------- statements */
   statement() {
@@ -3199,12 +3199,19 @@ function makeModules(I) {
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     return pat.replace(/%([YmdHMSaAbBjyZ%])/g, (_, c) => ({ Y: g.Y, m: pad(g.m), d: pad(g.d), H: pad(g.H), M: pad(g.M), S: pad(g.S), a: days[g.w].slice(0, 3), A: days[g.w], b: months[g.m - 1].slice(0, 3), B: months[g.m - 1], y: pad(g.Y % 100), Z: local ? "" : "UTC", j: pad(Math.floor((d - new Date(Date.UTC(g.Y, 0, 1))) / 864e5) + 1, 3), "%": "%" }[c]));
   };
-  const wait = secs => { const end = Date.now() + Math.min(Math.max(secs, 0), 2) * 1000; while (Date.now() < end) { /* busy wait (capped) */ } return null; };
+  // a duration in seconds: a number, or a time quantity (500ms, delay) converted to seconds
+  const seconds = (v, what) => {
+    if (!(v instanceof Quantity)) return num(v);
+    if (v.ns.name !== "time" || v.ns.index("s") < 0) fail("TypeError", `${what} expects seconds or a time quantity, not ${I.typeName(v)}`);
+    return I.unitReal(v, v.ns.index("s"));
+  };
+  const clock = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const wait = secs => { const end = clock() + Math.min(Math.max(secs, 0), 2) * 1000; while (clock() < end) { /* busy wait (capped) */ } return null; };
   const time = mod("time", {
     now: () => Date.now() / 1000,
     monotonic: () => ((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) / 1000,
-    sleep: ([s]) => wait(num(s)), delay: ([s]) => wait(num(s)),
-    sleep_ms: ([ms]) => wait(num(ms) / 1000),
+    sleep: ([s]) => wait(seconds(s, "time.sleep")), delay: ([s]) => wait(seconds(s, "time.delay")),
+    sleep_ms: ([ms]) => wait(ms instanceof Quantity ? seconds(ms, "time.sleep_ms") : num(ms) / 1000),
     millis: () => BigInt(Math.floor(((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0))),
     elapsed: ([start]) => ((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) / 1000 - num(start),
     unix: () => BigInt(Math.floor(Date.now() / 1000)),
@@ -3432,7 +3439,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.1 (beta-1) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.2 (beta-2) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);
