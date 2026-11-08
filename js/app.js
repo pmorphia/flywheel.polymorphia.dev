@@ -458,17 +458,19 @@ const term = (() => {
         line(`<span class="o-dim">Ctrl+Enter runs the editor · Tab completes · ↑↓ history · Ctrl+L clears · Ctrl+C stops</span>`);
     } },
     { name: "run", desc: "run the program in the editor", run() { runProgram(); } },
-    { name: "flywheel", alias: ["fw"], desc: "flywheel run | check | repl | --version", args: ["run", "check", "repl", "--version", "help"], run(a) {
-        const sub = a[0];
+    { name: "flywheel", alias: ["fw"], desc: "flywheel run | check | repl | version", args: ["run", "check", "repl", "version", "help"], run(a) {
+        const short = { r: "run", c: "check", h: "help", "-h": "help", v: "version", "--version": "version" };
+        const sub = Object.hasOwn(short, a[0]) ? short[a[0]] : a[0];
         if (!sub || sub === "help" || sub === "--help") {
           line(`usage: flywheel <command> [file]`);
-          line(`  <span class="o-acc">run</span> [file]   <span class="o-dim">compile and run (here: the editor, or an example)</span>`);
-          line(`  <span class="o-acc">check</span> [file] <span class="o-dim">parse without running</span>`);
-          line(`  <span class="o-acc">repl</span>         <span class="o-dim">interactive session</span>`);
-          line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, fmt, doc and lsp — </span><a href="#" data-install>install it</a>`);
+          line(`  <span class="o-acc">run</span>, r [file]   <span class="o-dim">compile and run (here: the editor, or an example)</span>`);
+          line(`  <span class="o-acc">check</span>, c [file] <span class="o-dim">parse without running</span>`);
+          line(`  <span class="o-acc">repl</span>            <span class="o-dim">interactive session</span>`);
+          line(`  <span class="o-acc">version</span>, v      <span class="o-dim">print the version</span>`);
+          line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, format, doc and lsp — </span><a href="#" data-install>install it</a>`);
           return;
         }
-        if (sub === "--version" || sub === "version") return text("flywheel 2.13 (beta-13) — flywheel.js 2.2 (beta-2), in your browser");
+        if (sub === "version") return text("flywheel 2.15 (beta-15) — flywheel.js 2.3 (beta-3), in your browser");
         if (sub === "repl") return startRepl();
         if (sub === "run" || sub === "check") {
           let code = ed.value;
@@ -582,7 +584,7 @@ const term = (() => {
   /* ---------- REPL */
   function startRepl() {
     repl = { buf: [] };
-    line(`<span class="o-vio">flywheel.js 2.2 (beta-2) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
+    line(`<span class="o-vio">flywheel.js 2.3 (beta-3) playground repl</span> <span class="o-dim">— statements and expressions; an expression on its own is printed.</span>`);
     line(`<span class="o-dim">:show lists the session, :reset clears it, :quit (or Ctrl+D) leaves</span>`);
     replLog = [];
     setPs1(); render();
