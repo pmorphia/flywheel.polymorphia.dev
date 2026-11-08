@@ -44,11 +44,11 @@ end
 
 function size(Shape shape) returns Size
     match shape
-        case Circle c if c.radius > 2.0 then
+        case Circle c if c.radius > 2.0 do
             return Size.Large
-        case Square s if s.side > 3.0 then
+        case Square s if s.side > 3.0 do
             return Size.Large
-        else
+        else do
             return Size.Small
     end
 end
@@ -78,9 +78,9 @@ var label = <output id="count">0</output>
 function change(int by)
     count += by
     label.text_content = string(count)
-    if count < 0 then
+    if count < 0 do
         label.add_class("negative")
-    else
+    else do
         label.remove_class("negative")
     end
 end
@@ -156,7 +156,7 @@ function refresh()
             <label><input type="checkbox" checked={task.done} onchange={toggler(task)}> {task.title}</label>
             <button class="x" onclick={remover(task)} title="remove">×</button>
         </li>
-        if task.done then
+        if task.done do
             item.add_class("done")
         end
         list.append(item)
@@ -170,7 +170,7 @@ function set_draft(string value)
 end
 
 function add()
-    if draft.trim().length > 0 then
+    if draft.trim().length > 0 do
         tasks.push(Task(draft.trim()))
         draft = ""
         refresh()
@@ -220,7 +220,7 @@ var bars = <g></g>
 int row = 0
 int widest = 0
 for name, n in stars do
-    if n > widest then
+    if n > widest do
         widest = n
     end
 end
@@ -312,26 +312,26 @@ end
 
 function evaluate(Expr e) returns double
     match e
-        case Expr.Number(v) then
+        case Expr.Number(v) do
             return v
-        case Expr.Add(a, b) then
+        case Expr.Add(a, b) do
             return evaluate(a) + evaluate(b)
-        case Expr.Multiply(a, b) then
+        case Expr.Multiply(a, b) do
             return evaluate(a) * evaluate(b)
-        case Expr.Negate(inner) then
+        case Expr.Negate(inner) do
             return -evaluate(inner)
     end
 end
 
 function show(Expr e) returns string
     match e
-        case Expr.Number(v) then
+        case Expr.Number(v) do
             return "{v:g}"
-        case Expr.Add(a, b) then
+        case Expr.Add(a, b) do
             return "(" + show(a) + " + " + show(b) + ")"
-        case Expr.Multiply(a, b) then
+        case Expr.Multiply(a, b) do
             return show(a) + " * " + show(b)
-        case Expr.Negate(inner) then
+        case Expr.Negate(inner) do
             return "-" + show(inner)
     end
 end
@@ -362,10 +362,10 @@ function bounds(double[] values) returns [double, double]
     var low = values[0]
     var high = values[0]
     for v in values do
-        if v < low then
+        if v < low do
             low = v
         end
-        if v > high then
+        if v > high do
             high = v
         end
     end
@@ -397,7 +397,7 @@ class ParseError
 end
 
 function parse_digit(string text, int column) returns int
-    if text.length != 1 or not ("0" <= text and text <= "9") then
+    if text.length != 1 or not ("0" <= text and text <= "9") do
         throw ParseError("expected a digit, got '{text}'", column)
     end
     return int(text)
@@ -422,7 +422,7 @@ for input in ["1234", "12x4"] do
 end
 
 function divide(int n, int d) returns Result<int, string>
-    if d == 0 then
+    if d == 0 do
         return Result.error("division by zero")
     end
     return Result.ok(n // d)
@@ -430,9 +430,9 @@ end
 
 for d in [4, 0] do
     match divide(42, d)
-        case ok value then
+        case ok value do
             print "42 // {d} = {value}"
-        case error why then
+        case error why do
             print "42 // {d} failed: {why}"
     end
 end
@@ -455,7 +455,7 @@ class Stack<T>
         inst items.push(item)
     end
     function pop() returns T?
-        if inst items.length == 0 then
+        if inst items.length == 0 do
             return null
         end
         return inst items.pop()
@@ -465,7 +465,7 @@ end
 function largest<T is comparable>(T[] items) returns T
     var best = items[0]
     for x in items do
-        if x > best then
+        if x > best do
             best = x
         end
     end
@@ -475,7 +475,7 @@ end
 class Countdown
     int n
     function next() returns int?
-        if inst n == 0 then
+        if inst n == 0 do
             return null
         end
         inst n -= 1

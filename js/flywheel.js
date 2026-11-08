@@ -36,7 +36,7 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
 /* =========================================================================================
  * lexer
  * ========================================================================================= */
-const KEYWORDS = new Set(("if then else while do for in end break continue return try catch finally throw and or not " +
+const KEYWORDS = new Set(("if else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is inst " +
   "attr super null true false defer private public readonly elements which").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
@@ -340,7 +340,7 @@ class Parser {
   endStmt() {
     if (this.op(";")) { this.next(); return; }
     if (this.is("nl")) { this.next(); return; }
-    if (this.is("eof") || this.kw("end") || this.kw("else") || this.kw("catch") || this.kw("finally") || this.kw("then") || this.kw("case")) return;
+    if (this.is("eof") || this.kw("end") || this.kw("else") || this.kw("catch") || this.kw("finally") || this.kw("case")) return;
     throw this.err(`expected end of statement, got ${this.desc(this.peek())}`);
   }
   withNL(n, f) { const s = this.skipNL; this.skipNL = n; try { return f(); } finally { this.skipNL = s; } }
@@ -710,12 +710,12 @@ class Parser {
     if (tk.t === "kw" && !/^(inst|super|attr)$/.test(tk.v) && !(tk.v === "function" && this.op("(", 1)))
       throw this.err(`${usage}, not '${tk.v}'`, tk);
     const e = this.outerExpr();
-    if (this.is("op") && ASSIGN_OPS.has(this.peek().v)) throw this.err(`${usage}; assignments need 'then' or 'do' ... 'end'`);
+    if (this.is("op") && ASSIGN_OPS.has(this.peek().v)) throw this.err(`${usage}; assignments need 'do' ... 'end'`);
     if (e.k !== "Call") throw this.err(usage, tk);
     return [{ k: "Expr", e, line: this.line(tk) }];
   }
   // `if condition run call`; the chain continues with `else run call` or `else if condition run
-  // call`, on the same line or the next. Any other `else` belongs to an enclosing `if ... then`.
+  // call`, on the same line or the next. Any other `else` belongs to an enclosing `if ... do`.
   runIf(branches, cond) {
     branches.push({ cond, body: this.runBody() });
     let otherwise = null;
@@ -745,7 +745,7 @@ class Parser {
     const branches = [];
     let cond = this.expr();
     if (this.runs()) return this.runIf(branches, cond);
-    this.expect("kw", "then");
+    this.expect("kw", "do");
     let body = this.block(["else", "end"]);
     branches.push({ cond, body });
     let otherwise = null;
@@ -753,12 +753,12 @@ class Parser {
       if (this.accept("kw", "if")) {
         cond = this.expr();
         if (this.runs()) { const rest = this.runIf(branches, cond); return rest; }
-        this.expect("kw", "then");
+        this.expect("kw", "do");
         branches.push({ cond, body: this.block(["else", "end"]) });
       } else if (this.runs()) {
         otherwise = this.runBody(); this.endStmt();
         return { k: "If", branches, otherwise };
-      } else { otherwise = this.block(["end"]); break; }
+      } else { this.expect("kw", "do"); otherwise = this.block(["end"]); break; }
     }
     this.expect("kw", "end"); this.endStmt();
     return { k: "If", branches, otherwise };
@@ -791,9 +791,9 @@ class Parser {
         do pats.push(this.pattern()); while (this.accept("op", ","));
         let guard = null;
         if (this.accept("kw", "if")) guard = this.expr();
-        this.expect("kw", "then");
+        this.expect("kw", "do");
         cases.push({ pats, guard, body: this.block(["case", "else", "end"]) });
-      } else if (this.accept("kw", "else")) { otherwise = this.block(["end"]); }
+      } else if (this.accept("kw", "else")) { this.expect("kw", "do"); otherwise = this.block(["end"]); }
       else break;
     }
     this.expect("kw", "end"); this.endStmt();
@@ -816,7 +816,7 @@ class Parser {
       const save = this.p;
       const t = this.tryType();
       if (t && t.name !== undefined || (t && (t.arr || t.opt))) {
-        if (this.is("id") && (this.is("kw", "then", 1) || this.is("kw", "if", 1) || this.op(",", 1))) {
+        if (this.is("id") && (this.is("kw", "do", 1) || this.is("kw", "if", 1) || this.op(",", 1))) {
           return { p: "Type", type: t, bind: this.next().v };
         }
       }
@@ -860,7 +860,7 @@ class Parser {
   }
   tryStmt() {
     this.next();
-    const body = this.block(["catch", "finally", "then", "end"]);
+    const body = this.block(["catch", "finally", "end"]);
     const catches = []; let fin = null;
     while (this.accept("kw", "catch")) {
       let type = null, name = null;
@@ -871,10 +871,10 @@ class Parser {
       }
       else if (this.is("id") && this.is("id", undefined, 1)) { type = this.type().name; name = this.name(); }
       else if (this.is("id")) { const n = this.name(); if (/^[A-Z]/.test(n) && (n === "Error" || ERROR_TYPES.includes(n))) type = n; else name = n; }
-      catches.push({ type, name, body: this.block(["catch", "finally", "then", "end"]) });
+      catches.push({ type, name, body: this.block(["catch", "finally", "end"]) });
     }
-    if (!catches.length && !this.is("kw", "finally") && !this.is("kw", "then")) throw this.err("try requires catch, finally, or then");
-    if (this.accept("kw", "finally") || this.accept("kw", "then")) fin = this.block(["end"]);
+    if (!catches.length && !this.is("kw", "finally")) throw this.err("try requires catch or finally");
+    if (this.accept("kw", "finally")) fin = this.block(["end"]);
     this.expect("kw", "end"); this.endStmt();
     return { k: "Try", body, catches, fin };
   }
@@ -3488,7 +3488,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.3 (beta-3) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.4 (beta-4) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

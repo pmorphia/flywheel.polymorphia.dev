@@ -51,7 +51,7 @@ var page = <main>
 </main>
 
 var title = page.query("#title")
-if title != null then
+if title != null do
     title.text_content = "Hello & welcome!"
 end
 for p in page.query_all(".cards p:nth-child(odd)") do

@@ -1,6 +1,6 @@
 # Errors, Results and defer
 
-`throw` raises a value; `catch Type name` handles that type, and `finally` (or `then`) always runs. You can also raise an error by name without declaring a class: `throw "Name" "message"` is caught by `catch "Name" e`, and `assert condition "message"` raises an `AssertionError`. Built-in errors include `KeyError`, `IndexError`, `ValueError` and `NumericError`.
+`throw` raises a value; `catch Type name` handles that type, and `finally` always runs. You can also raise an error by name without declaring a class: `throw "Name" "message"` is caught by `catch "Name" e`, and `assert condition "message"` raises an `AssertionError`. Built-in errors include `KeyError`, `IndexError`, `ValueError` and `NumericError`.
 
 ```flywheel
 class ParseError
@@ -8,11 +8,11 @@ class ParseError
 end
 
 function parse_age(string text) returns int
-    if text.trim().length == 0 then
+    if text.trim().length == 0 do
         throw ParseError("empty input")
     end
     var n = int(text)
-    if n < 0 then
+    if n < 0 do
         throw ValueError("age can't be negative")
     end
     return n
@@ -39,7 +39,7 @@ For a quick error you don't need a class. `throw "Name" "message"` raises an err
 
 ```flywheel
 function load(string key) returns string
-    if key == "" then
+    if key == "" do
         throw "EmptyKey" "the key is empty"
     end
     return key
@@ -50,7 +50,7 @@ for key in ["name", ""] do
         print "loaded", load(key)
     catch "EmptyKey" e
         print e.name + ":", e.message
-    then
+    finally
         print "  done with '{key}'"
     end
 end
@@ -68,7 +68,7 @@ end
 
 ```flywheel
 function divide(int n, int d) returns Result<int, string>
-    if d == 0 then
+    if d == 0 do
         return Result.error("division by zero")
     end
     return Result.ok(n // d)
@@ -76,9 +76,9 @@ end
 
 for d in [5, 0] do
     match divide(20, d)
-        case ok q then
+        case ok q do
             print "20 // {d} = {q}"
-        case error why then
+        case error why do
             print "failed:", why
     end
 end
@@ -97,7 +97,7 @@ function work(int steps)
     defer print "close"
     defer print "flush"
     for i in 1..steps do
-        if i == 3 then
+        if i == 3 do
             print "giving up at", i
             return
         end

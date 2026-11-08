@@ -27,11 +27,11 @@ end
 
 function area(Shape s) returns double
     match s
-        case Shape.Circle(r) then
+        case Shape.Circle(r) do
             return 3.14159 * r * r
-        case Shape.Rect(w, h) then
+        case Shape.Rect(w, h) do
             return w * h
-        case Shape.Empty then
+        case Shape.Empty do
             return 0.0
     end
 end
@@ -61,13 +61,13 @@ end
 
 function judge(int[] pair) returns string
     match pair
-        case [0, 0] then
+        case [0, 0] do
             return "origin"
-        case [x, 0] then
+        case [x, 0] do
             return "on the x axis at {x}"
-        case [x, y] if x == y then
+        case [x, y] if x == y do
             return "diagonal"
-        else
+        else do
             return "somewhere"
     end
 end
@@ -83,7 +83,7 @@ print label(Circle(2.5))
 ```flywheel
 function find(int[] xs, int x) returns int?
     for i, item in xs do
-        if item == x then
+        if item == x do
             return i
         end
     end
@@ -92,7 +92,7 @@ end
 
 var at = find([4, 8, 15], 8)
 print at ?? -1, find([4], 9) ?? -1
-if at != null then
+if at != null do
     print "found at", at + 1
 end
 ```

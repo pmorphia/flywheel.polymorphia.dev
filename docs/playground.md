@@ -4,7 +4,7 @@ The Flywheel compiler is C++ on top of LLVM and produces native executables, so 
 
 ## What works
 
-- The whole core language: classes, `init`, inheritance and `super`, interfaces, operators, `to_string`, enums (including enums with data), `match` with every pattern kind, generics, nullable values, closures, first-class methods, `defer`, `try`/`catch`/`finally` (with `then`, named errors such as `throw "Name" "message"` and `catch "Name" e`, and `assert`), `Result<T, E>`, format specs, ranges, tuples and destructuring.
+- The whole core language: classes, `init`, inheritance and `super`, interfaces, operators, `to_string`, enums (including enums with data), `match` with every pattern kind, generics, nullable values, closures, first-class methods, `defer`, `try`/`catch`/`finally` (with named errors such as `throw "Name" "message"` and `catch "Name" e`, and `assert`), `Result<T, E>`, format specs, ranges, tuples and destructuring.
 - Collections: arrays, maps, sets, tuples, freezing, sorting and the higher-order helpers.
 - Markup with `html.*` and `svg.*`, components, element families, CSS-selector queries, mutation and `html.parse`.
 - Apps: a program that **returns an element**, calls **`web.serve("/", …)`**, or loads a **`desktop.window`** is shown in the preview. Flywheel event handlers (`onclick={f}`, `oninput={f}`, …) run live, and the page re-renders after each event, as in desktop windows.

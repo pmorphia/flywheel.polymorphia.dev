@@ -109,7 +109,7 @@ A class becomes iterable by providing `next() returns T?`, or `iterator()` retur
 class Countdown
     int n
     function next() returns int?
-        if inst n == 0 then
+        if inst n == 0 do
             return null
         end
         inst n -= 1

@@ -1,15 +1,15 @@
 # Control flow
 
-Blocks start with `then` or `do` and close with `end`. There's no implicit truthiness: a condition must be a `bool`.
+Blocks start with `do` and close with `end`. There's no implicit truthiness: a condition must be a `bool`.
 
 ```flywheel
 var temperature = 18
 
-if temperature > 25 then
+if temperature > 25 do
     print "hot"
-else if temperature > 15 then
+else if temperature > 15 do
     print "mild"
-else
+else do
     print "cold"
 end
 
@@ -30,7 +30,7 @@ end
 
 ## One-call bodies with run
 
-When a branch or loop body is a single function call, write it after `run` instead of `then`/`do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`.
+When a branch or loop body is a single function call, write it after `run` instead of `do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`.
 
 ```flywheel
 function greet(string size)
@@ -54,10 +54,10 @@ for word in ["one", "two"] run print word
 
 ```flywheel
 for n in 1..10 do
-    if n % 2 == 0 then
+    if n % 2 == 0 do
         continue
     end
-    if n > 7 then
+    if n > 7 do
         break
     end
     print n
@@ -86,13 +86,13 @@ print not x == 4, x > 1 and x < 9, x == 5 or 1 // 0 == 0
 ```flywheel
 function describe(int code) returns string
     match code
-        case 0 then
+        case 0 do
             return "ok"
-        case 1, 2 then
+        case 1, 2 do
             return "warning"
-        case 3..9 then
+        case 3..9 do
             return "error"
-        else
+        else do
             return "unknown"
     end
 end

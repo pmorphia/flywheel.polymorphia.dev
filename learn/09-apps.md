@@ -12,9 +12,9 @@ var greeting = <p class="greeting">Type your name…</p>
 
 function typed(string value)
     name = value.trim()
-    if name.length == 0 then
+    if name.length == 0 do
         greeting.text_content = "Type your name…"
-    else
+    else do
         greeting.text_content = "Hello, {name}! That's {name.length} letters."
     end
 end

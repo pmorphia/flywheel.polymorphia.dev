@@ -8,7 +8,7 @@ function greet(string name, string greeting = "Hello") returns string
 end
 
 function fib(int n) returns int
-    if n < 2 then
+    if n < 2 do
         return n
     end
     return fib(n - 1) + fib(n - 2)
