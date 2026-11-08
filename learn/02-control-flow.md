@@ -30,7 +30,7 @@ end
 
 ## One-call bodies with run
 
-When a branch or loop body is a single function call, write it after `run` instead of `do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`.
+When a branch or loop body is a single function call, write it after `run` instead of `do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`. As with any call statement, the parentheses are optional: `run show` calls `show()`.
 
 ```flywheel
 function greet(string size)
@@ -46,6 +46,11 @@ end
 var queue = ["a", "b"]
 while queue.length > 0 run print "took", queue.pop()
 for word in ["one", "two"] run print word
+
+function show
+    print "queue is empty"
+end
+if queue.length == 0 run show
 ```
 
 ## Ranges and loops

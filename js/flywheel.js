@@ -709,8 +709,11 @@ class Parser {
     if (this.eol()) throw this.err(usage, tk);
     if (tk.t === "kw" && !/^(inst|super|attr)$/.test(tk.v) && !(tk.v === "function" && this.op("(", 1)))
       throw this.err(`${usage}, not '${tk.v}'`, tk);
-    const e = this.outerExpr();
+    let e = this.outerExpr();
     if (this.is("op") && ASSIGN_OPS.has(this.peek().v)) throw this.err(`${usage}; assignments need 'do' ... 'end'`);
+    // A bare name or member calls it with no arguments, as a statement does: `run main_loop`.
+    if ((e.k === "Ident" || e.k === "Member") && !(tk.t === "op" && tk.v === "("))
+      e = { k: "Call", callee: e, args: [], outer: true, line: this.line(tk) };
     if (e.k !== "Call") throw this.err(usage, tk);
     return [{ k: "Expr", e, line: this.line(tk) }];
   }
