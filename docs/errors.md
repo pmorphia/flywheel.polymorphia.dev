@@ -19,12 +19,12 @@ Native runtime errors include `FileError`, `IndexError`, `KeyError`, `NumericErr
 
 ### Named errors and `assert`
 
-`throw "Name" "message"` (a comma between them is optional) raises an error named by a string, without declaring a class. `catch "Name" e` catches errors by name: errors thrown with that name, builtin errors of that type, and instances of a class with that name. The binding is optional (`catch "Name"`). If the name is a builtin error type (`catch "ValueError" e`), the binding has that type; otherwise it is an `Error`. Every error binding has `.name` (its type name as written in source) and `.message`:
+`throw "Name" with "message"` raises an error named by a string, without declaring a class. `catch "Name" e` catches errors by name: errors thrown with that name, builtin errors of that type, and instances of a class with that name. The binding is optional (`catch "Name"`). If the name is a builtin error type (`catch "ValueError" e`), the binding has that type; otherwise it is an `Error`. Every error binding has `.name` (its type name as written in source) and `.message`:
 
 ```flywheel
 function load(string key) returns string
     if key == "" do
-        throw "EmptyKey" "the key is empty"
+        throw "EmptyKey" with "the key is empty"
     end
     return key
 end

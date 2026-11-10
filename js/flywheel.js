@@ -37,8 +37,8 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
  * lexer
  * ========================================================================================= */
 const KEYWORDS = new Set(("if else while do for in end break continue return try catch finally throw and or not " +
-  "var const function returns class component interface enum extends implements match case import as is inst " +
-  "attr super null true false defer private public readonly elements which").split(" "));
+  "var const function returns class component interface enum extends implements match case import as is this " +
+  "attr super null true false defer readonly elements which").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
   "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
 // a line ending in one of these continues onto the next line
@@ -336,6 +336,34 @@ class Parser {
   }
   line(tk) { return this.S.pos((tk || this.peek()).s).line; }
   eol() { return this.is("nl") || this.is("eof") || this.op(";"); }
+  sameLine(a, b) { return this.line(this.peek(a)) === this.line(this.peek(b)); }
+  // public / private / protected / static are soft keywords before a declaration on the same line
+  modifierAhead() {
+    const t = this.peek();
+    return t.t === "id" && /^(public|private|protected|static)$/.test(t.v) &&
+      (this.is("id", undefined, 1) || this.is("kw", undefined, 1)) && this.sameLine(0, 1) && !this.op("=", 1);
+  }
+  // decorators before `function name` / `class name` on the same line: memoize function f
+  decorators() {
+    const first = this.peek();
+    if (first.t !== "id") return [];
+    let depth = 0, found = false;
+    for (let n = 0; ; n++) {
+      const t = this.peek(n);
+      if (t.t === "nl" || t.t === "eof") break;
+      if (t.t === "op" && "([{".includes(t.v)) depth++;
+      else if (t.t === "op" && ")]}".includes(t.v)) depth--;
+      else if (depth === 0 && n > 0 && t.t === "kw" && (t.v === "function" || t.v === "class") && this.is("id", undefined, n + 1)) { found = true; break; }
+      else if (depth === 0 && t.t === "op" && t.v === "=") break;
+    }
+    if (!found) return [];
+    const out = [];
+    while (!this.kw("function") && !this.kw("class")) {
+      if (!this.is("id")) throw this.err("expected a decorator name before 'function' or 'class'");
+      out.push(this.postfix(this.primary()));
+    }
+    return out;
+  }
   eol1() { const t = this.peek(1); return t.t === "nl" || t.t === "eof" || (t.t === "op" && t.v === ";"); }
   endStmt() {
     if (this.op(";")) { this.next(); return; }
@@ -358,6 +386,8 @@ class Parser {
       if (tk.t === "eof" && !enders.includes("eof")) throw this.err("expected 'end', got end of file");
       if ((tk.t === "kw" || tk.t === "eof") && enders.includes(tk.t === "eof" ? "eof" : tk.v)) return out;
       out.push(this.statement());
+      // static field initializers and decorator applications follow their declaration
+      if (this.pending && this.pending.length) { out.push(...this.pending); this.pending = []; }
     }
   }
 
@@ -440,9 +470,28 @@ class Parser {
   }
   statementInner() {
     const tk = this.peek();
+    if (this.modifierAhead()) {
+      if (/^(protected|static)$/.test(tk.v)) throw this.err(`'${tk.v}' applies to class members`);
+      this.next(); return this.statementInner();
+    }
+    const decos = this.decorators();
+    if (decos.length) {
+      if (this.kw("function")) {
+        // f = decorator(f): the function is renamed and `f` is a constant holding the result
+        const f = this.funcDecl(), name = f.name;
+        f.name = name + "$undecorated";
+        let value = { k: "Ident", name: f.name, line: f.line };
+        for (let i = decos.length - 1; i >= 0; i--) value = { k: "Call", callee: decos[i], args: [value], line: f.line };
+        (this.pending = this.pending || []).push({ k: "Var", name, type: null, value, isConst: true, line: f.line });
+        return f;
+      }
+      const c = this.classDecl();
+      // class decorators are called with the class where it is declared; results are discarded
+      for (let i = decos.length - 1; i >= 0; i--) (this.pending = this.pending || []).push({ k: "Expr", e: { k: "Call", callee: decos[i], args: [{ k: "Ident", name: c.name, line: c.line }], line: c.line }, line: c.line });
+      return c;
+    }
     if (tk.t === "kw") {
       switch (tk.v) {
-        case "private": case "public": this.next(); return this.statementInner();
         case "import": return this.importStmt();
         case "function":
           if (this.is("id", undefined, 1)) return this.funcDecl();
@@ -468,14 +517,14 @@ class Parser {
         case "throw": {
           this.next();
           const value = this.expr();
-          // throw "Name" "message"  (a comma between the two is optional)
-          if (!this.eol() && !this.kw("end") && (value.k === "Lit" || value.k === "Str")) {
-            this.accept("op", ",");
+          // throw "Name" with "message", throw ErrorType with "message"
+          if (this.is("id", "with")) {
+            this.next();
+            if (this.eol() || this.kw("end")) throw this.err("'with' expects a message, such as throw BadInput with \"the input is bad\"");
             const msg = this.expr();
-            if (value.k !== "Lit" || typeof value.v !== "string" || !(msg.k === "Lit" && typeof msg.v === "string" || msg.k === "Str"))
-              throw this.err("throw with a name expects two strings");
-            this.endStmt(); return { k: "Throw", name: value.v, value: msg };
+            this.endStmt(); return { k: "Throw", value, with: msg };
           }
+          if (!this.eol() && !this.kw("end")) throw this.err("expected 'with' before the message, such as throw \"Name\" with \"message\"");
           this.endStmt(); return { k: "Throw", value };
         }
         case "defer": {
@@ -600,9 +649,10 @@ class Parser {
     });
     return params;
   }
-  funcHeader() {
+  funcHeader(inClass) {
     const kwTk = this.expect("kw", "function");
     let name = this.name();
+    if (inClass && name === "init") throw this.err("constructors are declared with constructor(...) ... end, not function init", kwTk);
     if (name === "operator") {
       if (this.op("[")) { this.next(); this.expect("op", "]"); name = "operator []"; if (this.op("=") && !this.peek().sp) { this.next(); name += "="; } }
       else { const o = this.next(); name = "operator " + o.v; }
@@ -613,29 +663,69 @@ class Parser {
     if (this.accept("kw", "returns")) ret = this.type();
     return { name, params, ret, tparams, line: this.line(kwTk) };
   }
-  funcDecl() {
-    const h = this.funcHeader();
+  funcDecl(inClass) {
+    const h = this.funcHeader(inClass);
     if (this.accept("op", "=>")) { const e = this.expr(); this.endStmt(); return { k: "Func", ...h, body: [{ k: "Return", value: e, line: h.line }] }; }
     this.expect("nl");
     const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt();
     return { k: "Func", ...h, body };
   }
   classDecl() {
-    this.next();
+    const ctk = this.next();
     const name = this.name(), tparams = this.skipTypeParams();
-    let base = null; const ifaces = [];
-    if (this.accept("kw", "extends")) base = this.type().name;
+    const bases = []; const ifaces = [];
+    if (this.accept("kw", "extends")) { do bases.push(this.type().name); while (this.accept("op", ",")); }
     if (this.accept("kw", "implements")) { do ifaces.push(this.type().name); while (this.accept("op", ",")); }
     this.expect("nl");
-    const fields = [], methods = [];
+    const fields = [], methods = [], statics = [], staticMethods = [];
     for (;;) {
       while (this.is("nl") || this.op(";")) this.next();
       if (this.kw("end")) break;
       if (this.is("eof")) throw this.err(`expected 'end' to close class ${name}`);
+      // public / private / protected / static / readonly / constructor / destructor are soft keywords
       const mods = new Set();
-      while (this.kw("private") || this.kw("readonly") || this.kw("public")) mods.add(this.next().v);
-      if (this.kw("function")) { const m = this.funcDecl(); m.mods = mods; methods.push(m); continue; }
+      for (;;) {
+        if (this.modifierAhead()) { const m = this.next().v; if (m !== "static" && [...mods].some(x => /^(public|private|protected)$/.test(x))) throw this.err("a member has one access modifier"); mods.add(m); continue; }
+        if (this.kw("readonly")) { mods.add(this.next().v); continue; }
+        break;
+      }
+      const t = this.peek();
+      if (t.t === "id" && (t.v === "constructor" || t.v === "destructor") &&
+          (this.op("(", 1) || this.is("nl", undefined, 1) || this.is("eof", undefined, 1) || this.is("id", undefined, 1))) {
+        if (mods.has("static") || mods.has("readonly")) throw this.err(`'${mods.has("static") ? "static" : "readonly"}' does not apply to ${t.v}s`);
+        const dtor = t.v === "destructor", line = this.line(this.next());
+        let params = [];
+        if (this.op("(")) params = this.params();
+        else if (!this.eol()) {
+          for (;;) { const type = this.type(), pname = this.name(); let def = null; if (this.accept("op", "=")) def = this.expr(); params.push({ name: pname, type, def }); if (!this.accept("op", ",")) break; }
+        }
+        if (dtor && params.length) throw this.err("a destructor takes no parameters");
+        if (this.kw("returns")) throw this.err(`${t.v}s cannot return a value`);
+        this.expect("nl");
+        const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt();
+        const mname = dtor ? "$destroy" : "init";
+        if (methods.some(m => m.name === mname)) throw this.err(`class ${name} already has a ${t.v}`);
+        methods.push({ k: "Func", name: mname, params, ret: null, tparams: [], line, body, mods });
+        continue;
+      }
+      if (this.kw("function")) {
+        const m = this.funcDecl(true); m.mods = mods;
+        if (mods.has("static")) staticMethods.push(m); else methods.push(m);
+        continue;
+      }
+      if (this.is("id") && this.kw("function", 1)) throw this.err("decorators apply to top-level functions and classes");
       const ftk = this.peek();
+      if (mods.has("static")) {
+        const isConst = !!this.accept("kw", "const") || mods.has("readonly");
+        let type = null;
+        if (this.kw("var")) this.next();
+        else if (!this.op("=", 1)) type = this.type();
+        const fname = this.name();
+        if (!this.accept("op", "=")) throw this.err("static fields need an initial value, such as static int count = 0");
+        const def = this.expr(); this.endStmt();
+        statics.push({ name: fname, type, def, mods, isConst, line: this.line(ftk) });
+        continue;
+      }
       const type = this.type(), fname = this.name();
       let def = null;
       if (this.accept("op", "=")) def = this.expr();
@@ -643,7 +733,7 @@ class Parser {
       fields.push({ name: fname, type, def, mods, line: this.line(ftk) });
     }
     this.expect("kw", "end"); this.endStmt();
-    return { k: "Class", name, tparams, base, ifaces, fields, methods };
+    return { k: "Class", name, tparams, bases, ifaces, fields, methods, statics, staticMethods, line: this.line(ctk) };
   }
   ifaceDecl() {
     this.next();
@@ -791,7 +881,8 @@ class Parser {
       while (this.is("nl")) this.next();
       if (this.accept("kw", "case")) {
         const pats = [];
-        do pats.push(this.pattern()); while (this.accept("op", ","));
+        this.noTernary = true;
+        try { do pats.push(this.pattern()); while (this.accept("op", ",")); } finally { this.noTernary = false; }
         let guard = null;
         if (this.accept("kw", "if")) guard = this.expr();
         this.expect("kw", "do");
@@ -899,7 +990,8 @@ class Parser {
   // An expression that may be an outer call without parentheses:  print a, b   /   f x
   outerExpr() {
     const tk = this.peek();
-    if (tk.t === "id" || (tk.t === "kw" && (tk.v === "inst" || tk.v === "super"))) {
+    if (tk.t === "id" && tk.v === "spawn" && (this.is("id", undefined, 1) || this.kw("function", 1)) && this.sameLine(0, 1)) return this.expr();
+    if (tk.t === "id" || (tk.t === "kw" && (tk.v === "this" || tk.v === "super"))) {
       const save = this.p;
       let head = this.postfix(this.primary(), true);
       if ((head.k === "Ident" || head.k === "Member" || head.k === "InstField") && this.op("(") && this.peek().sp) {
@@ -927,7 +1019,7 @@ class Parser {
     const t = this.peek();
     if (t.t === "nl" || t.t === "eof") return false;
     if (t.t === "num" || t.t === "str" || t.t === "char" || t.t === "markup" || t.t === "json" || t.t === "id") return true;
-    if (t.t === "kw") return /^(true|false|null|not|function|inst|attr)$/.test(t.v);
+    if (t.t === "kw") return /^(true|false|null|not|function|this|attr|super)$/.test(t.v);
     if (t.t === "op") {
       if ((t.v === "(" || t.v === "[") && t.sp) return true;
       if ((t.v === "-" || t.v === "+") && t.sp && !this.peek(1).sp) return true;
@@ -939,6 +1031,16 @@ class Parser {
   expr(minPrec) {
     let e = this.infix(this.unary(), minPrec || 0);
     while (!minPrec && this.peek().t === "kw" && this.peek().v === "which") e = this.which(e);
+    // x if condition else y: the lowest precedence, right associative
+    if (!minPrec && !this.noTernary && this.kw("if")) {
+      const tk = this.next();
+      const saved = this.noTernary; this.noTernary = true;
+      let cond;
+      try { cond = this.expr(); } finally { this.noTernary = saved; }
+      if (!this.kw("else")) throw this.err("'x if condition' needs 'else': x if condition else y");
+      this.next();
+      e = { k: "Ternary", c: cond, a: e, b: this.expr(), line: this.line(tk) };
+    }
     return e;
   }
   which(items) {
@@ -1007,19 +1109,33 @@ class Parser {
       case "char": return { k: "Lit", v: tk.v };
       case "markup": return this.markup(tk.v);
       case "json": return { k: "JsonLit", v: tk.v };
-      case "id": return { k: "Ident", name: tk.v, line };
+      case "id":
+        if (tk.v === "inst" && this.is("id") && this.line(this.peek()) === line) throw this.err(`'inst' was removed: write this.${this.peek().v}`, tk);
+        if (tk.v === "spawn" && (this.is("id") || this.kw("function")) && this.line(this.peek()) === line) return this.spawn(line);
+        return { k: "Ident", name: tk.v, line };
       case "kw":
         switch (tk.v) {
           case "true": return { k: "Lit", v: true };
           case "false": return { k: "Lit", v: false };
           case "null": return { k: "Lit", v: null };
-          case "inst": {
-            if (this.op("(") && !this.peek().sp) return { k: "Self" };
-            if (!this.is("id")) return { k: "Self" };
-            return { k: "InstField", name: this.name(), line };
+          case "this": {
+            // this.name: a field or bound method of the receiver; `this` alone is the receiver
+            if (this.op(".") && this.is("id", undefined, 1)) { this.next(); return { k: "InstField", name: this.name(), line }; }
+            return { k: "Self" };
           }
           case "attr": return { k: "Attr", name: this.name(), line };
-          case "super": this.expect("op", "."); return { k: "Super", name: this.name(), line };
+          case "super": {
+            // super.name, super.constructor(...) (the base constructor), super.Base.name
+            this.expect("op", ".");
+            let name = this.name();
+            if (name === "init") throw this.err("constructors are called with super.constructor(...)");
+            if (name === "constructor") name = "init";
+            let base = null;
+            if (this.op(".") && this.is("id", undefined, 1) && (/^[A-Z]/.test(name) || this.peek(1).v === "constructor")) {
+              this.next(); base = name; name = this.name(); if (name === "constructor") name = "init";
+            }
+            return { k: "Super", name, base, line };
+          }
           case "function": return this.lambda(line);
         }
         break;
@@ -1053,6 +1169,19 @@ class Parser {
         }
     }
     throw this.err(`expected an expression, got ${this.desc(tk)}`, tk);
+  }
+  // spawn f(x) / spawn worker / spawn function() ... end: flywheel.js has no threads, so the call
+  // runs at once and the task keeps its result (or error) for join()
+  spawn(line) {
+    let target;
+    if (this.kw("function")) { this.next(); target = { k: "Call", callee: this.lambda(line), args: [], line }; }
+    else {
+      if (this.peek().t === "kw") throw this.err("'spawn' expects a function call or a function, such as 'spawn work(5)'");
+      target = this.outerExpr();
+      if (/^(Ident|Member|InstField)$/.test(target.k)) target = { k: "Call", callee: target, args: [], line };
+      if (target.k !== "Call") throw this.err("'spawn' expects a function call or a function, such as 'spawn work(5)'");
+    }
+    return { k: "Spawn", fn: { k: "Lambda", params: [], ret: null, body: [{ k: "Return", value: target, line }], line }, line };
   }
   lambda(line) {
     const params = this.params();
@@ -1159,8 +1288,14 @@ class FwFunc {
 class Bound { constructor(fn, self) { this.fn = fn; this.self = self; } }
 class Native { constructor(name, fn) { this.name = name; this.fn = fn; } }
 class FwClass {
-  constructor(name) { this.name = name; this.base = null; this.ifaces = []; this.fields = []; this.methods = new Map(); this.isInterface = false; this.isEnumMember = false; }
+  constructor(name) {
+    this.name = name; this.base = null; this.bases = []; this.ifaces = []; this.fields = []; this.methods = new Map();
+    this.isInterface = false; this.isEnumMember = false;
+    this.statics = new Map(); this.access = new Map(); this.staticAccess = new Map();
+  }
 }
+// thread.task, the value of `spawn call`
+const TASK = new FwClass("thread.task");
 class FwEnum { constructor(name) { this.name = name; this.members = []; this.byName = new Map(); } }
 class EnumMember { constructor(en, name, index, fields) { this.en = en; this.name = name; this.index = index; this.fields = fields; this.value = null; } }
 class Module { constructor(name, members) { this.name = name; this.members = members; } }
@@ -1222,8 +1357,29 @@ const seqItems = v => Array.isArray(v) ? v : v instanceof Tuple ? v.items : null
 const cps = s => Array.from(s);
 const strLen = s => { let n = 0; for (const _ of s) n++; return n; };
 
+// The C3 linearization of a class: itself, then its bases, every class before its own bases.
+function mro(cls) {
+  if (cls._mro) return cls._mro;
+  const seqs = cls.bases.map(b => mro(b).slice()).concat([cls.bases.slice()]);
+  const out = [cls];
+  for (;;) {
+    const live = seqs.filter(q => q.length);
+    if (!live.length) break;
+    const next = live.map(q => q[0]).find(c => !live.some(q => q.indexOf(c) > 0));
+    if (!next) throw new FwThrow(new FwError("TypeError", `class ${cls.name} has an inconsistent base class order (no linearization)`));
+    out.push(next);
+    for (const q of live) if (q[0] === next) q.shift();
+  }
+  return (cls._mro = out);
+}
 function findMethod(cls, name) {
-  for (let c = cls; c; c = c.base) { const m = c.methods.get(name); if (m) return m; }
+  for (const c of mro(cls)) { const m = c.methods.get(name); if (m) return m; }
+  return null;
+}
+// super.name: the implementation after `from` in the linearization of `cls`
+function nextMethod(cls, from, name) {
+  const order = mro(cls);
+  for (let i = order.indexOf(from) + 1; i < order.length; i++) { const m = order[i].methods.get(name); if (m) return m; }
   return null;
 }
 function isSubclass(cls, target) {
@@ -1232,7 +1388,7 @@ function isSubclass(cls, target) {
     if (!c || seen.has(c)) return false;
     seen.add(c);
     if (c === target) return true;
-    if (walk(c.base)) return true;
+    if (c.bases.some(walk)) return true;
     return c.ifaces.some(walk);
   };
   return walk(cls);
@@ -1466,6 +1622,8 @@ class Interp {
     this.out = opts.print || (s => console.log(s));
     this.errOut = opts.error || (s => console.error(s));
     this.global = new Scope(null, null);
+    this.finalizable = new Set();
+    this.curCls = null;
     this.components = new Map();
     this.routes = [];
     this.windows = [];
@@ -1498,9 +1656,11 @@ class Interp {
         }
         this.execStmt(st, this.global);
       }
+      this.finalizeAll();
       return { status: 0, value: null };
     } catch (e) {
       if (e instanceof ReturnSig) {
+        try { this.finalizeAll(); } catch (f) { if (!(f instanceof FwThrow)) throw f; }
         const v = e.v;
         if (v instanceof FwElement) return { status: 0, value: v };
         if (typeof v === "bigint") return { status: Number(v), value: null };
@@ -1550,29 +1710,75 @@ class Interp {
       if (st.k === "Interface") { const c = scope.get(st.name); c.ifaces = st.bases.map(b => this.typeRef(b, scope)).filter(Boolean); }
       if (st.k === "Class") this.buildClass(scope.get(st.name), st, scope);
     }
+    // check each class's layout and method order up front, as the compiler does
+    for (const st of stmts) if (st.k === "Class") { const c = scope.get(st.name); mro(c); this.allFields(c); }
   }
   typeRef(name, scope) {
     const v = name.split(".").reduce((acc, part, i) => i === 0 ? scope.get(part) : acc && this.member(acc, part), null);
     return v;
   }
   buildClass(c, st, scope) {
-    if (st.base) {
-      const b = this.typeRef(st.base, scope);
-      if (!(b instanceof FwClass)) throw new CompileError(`unknown base class '${st.base}'`, st.line, 1);
-      c.base = b;
+    for (const name of st.bases || []) {
+      const b = this.typeRef(name, scope);
+      if (!(b instanceof FwClass) || b.isInterface) throw new CompileError(`unknown base class '${name}'`, st.line, 1);
+      if (c.bases.includes(b)) throw new CompileError(`duplicate base class '${name}'`, st.line, 1);
+      c.bases.push(b);
     }
+    c.base = c.bases[0] || null;
     c.ifaces = st.ifaces.map(n => { const i = this.typeRef(n, scope); if (!(i instanceof FwClass)) throw new CompileError(`unknown interface '${n}'`, st.line, 1); return i; });
     c.ownFields = st.fields;
     c.scope = scope;
     for (const m of st.methods) c.methods.set(m.name, new FwFunc(m.name, m.params, m.body, scope, { cls: c, method: true }));
-    c.private = new Set([...st.fields, ...st.methods].filter(x => x.mods && x.mods.has("private")).map(x => x.name));
+    const accessOf = mods => mods && mods.has("private") ? "private" : mods && mods.has("protected") ? "protected" : null;
+    for (const x of [...st.fields, ...st.methods]) if (accessOf(x.mods)) c.access.set(x.name, accessOf(x.mods));
+    for (const m of st.staticMethods || []) {
+      c.statics.set(m.name, new FwFunc(m.name, m.params, m.body, scope, { cls: c }));
+      if (accessOf(m.mods)) c.staticAccess.set(m.name, accessOf(m.mods));
+    }
+    for (const f of st.statics || []) {
+      if (accessOf(f.mods)) c.staticAccess.set(f.name, accessOf(f.mods));
+      if (f.isConst) (c.constStatics = c.constStatics || new Set()).add(f.name);
+    }
   }
+  // Base fields first, in base order; a field inherited along two paths appears once.
   allFields(c) {
     if (c._all) return c._all;
-    const fs = c.base ? this.allFields(c.base).slice() : [];
-    for (const f of c.ownFields || []) fs.push(f);
+    const fs = [], owners = new Map();
+    for (const b of c.bases) for (const f of this.allFields(b)) {
+      const owner = b._owners.get(f.name);
+      if (owners.has(f.name)) {
+        if (owners.get(f.name) !== owner) fail("TypeError", `base classes of ${c.name} both declare a field '${f.name}'`);
+        continue;
+      }
+      owners.set(f.name, owner); fs.push(f);
+    }
+    for (const f of c.ownFields || []) {
+      if (owners.has(f.name)) fail("TypeError", `field '${f.name}' is already declared by base class '${owners.get(f.name).name}'`);
+      owners.set(f.name, c); fs.push(f);
+    }
+    c._owners = owners;
     return (c._all = fs);
   }
+  // The class declaring a member (field or method) of instances of `cls`.
+  declaring(cls, name) {
+    this.allFields(cls);
+    if (cls._owners.has(name)) return cls._owners.get(name);
+    for (const c of mro(cls)) if (c.methods.has(name)) return c;
+    return null;
+  }
+  // Private members are visible in their own class; protected ones also in subclasses.
+  checkAccess(cls, name, kind) {
+    const owner = this.declaring(cls, name);
+    const access = owner && owner.access.get(name);
+    if (access) this.checkVisible(owner, name, access, kind);
+  }
+  checkVisible(owner, name, access, kind) {
+    const ctx = this.curCls;
+    if (ctx === owner || (access === "protected" && ctx && isSubclass(ctx, owner))) return;
+    fail("TypeError", access === "protected" ? `${kind} '${name}' is protected: visible only in ${owner.name} and its subclasses`
+      : `${kind} '${name}' is private to class ${owner.name}`);
+  }
+  staticHolder(cls, name) { for (const c of mro(cls)) if (c.statics.has(name)) return c; return null; }
   makeEnum(st, scope) {
     const en = new FwEnum(st.name);
     st.members.forEach((m, i) => {
@@ -1619,7 +1825,18 @@ class Interp {
     this.line = st.line || this.line;
     this.tick();
     switch (st.k) {
-      case "Nop": case "Func": case "Class": case "Interface": case "Enum": case "Component": case "Import":
+      case "Class": {
+        // static fields are initialized where the class is declared
+        const c = scope.get(st.name);
+        for (const f of st.statics || []) {
+          let v = this.evalWithType(f.def, scope, f.type);
+          if (f.type) v = this.coerce(v, f.type, scope);
+          const prev = this.curCls; this.curCls = c;
+          try { this.setMember(c, f.name, v, true); } finally { this.curCls = prev; }
+        }
+        return;
+      }
+      case "Nop": case "Func": case "Interface": case "Enum": case "Component": case "Import":
       case "UnitNs": case "UnitDecl": case "UnitConv": return;
       case "Expr": this.evalExprStmt(st.e, scope); return;
       case "Var": {
@@ -1656,8 +1873,17 @@ class Interp {
       case "Break": throw BREAK;
       case "Continue": throw CONTINUE;
       case "Throw": {
-        const v = this.eval(st.value, scope);
-        if (st.name !== undefined) throw new FwThrow(new FwError(st.name, this.show(v, false)));
+        let v = this.eval(st.value, scope);
+        if (st.with) {
+          const msg = this.eval(st.with, scope);
+          if (typeof msg !== "string") fail("CastError", "throw ... with expects a string message");
+          if (typeof v === "string") throw new FwThrow(new FwError(v, msg));
+          if (v instanceof Native && ERROR_TYPES.includes(v.name) && v.name !== "Error") throw new FwThrow(new FwError(v.name, msg));
+          if (v instanceof FwClass) v = this.construct(v, []);
+          if (!(v instanceof Instance)) fail("CastError", "throw ... with expects an error type or a string name, then a string message: throw BadInput with \"message\"");
+          v.f.set("message", msg);
+          throw new FwThrow(v);
+        }
         if (v === null) fail("RuntimeError", "cannot throw null");
         throw new FwThrow(v);
       }
@@ -1825,6 +2051,7 @@ class Interp {
       case "InstField": {
         const self = this.self(scope);
         if (!self.f.has(t.name) && !this.allFields(self.cls).some(f => f.name === t.name)) fail("RuntimeError", `${self.cls.name} has no field '${t.name}'`);
+        this.checkAccess(self.cls, t.name, "field");
         self.f.set(t.name, st.op === "=" ? compute() : compute(self.f.get(t.name))); return;
       }
       case "Member": {
@@ -1839,10 +2066,19 @@ class Interp {
       }
     }
   }
-  setMember(obj, name, v) {
+  setMember(obj, name, v, defining) {
     if (obj instanceof Instance) {
       if (!this.allFields(obj.cls).some(f => f.name === name)) fail("RuntimeError", `${obj.cls.name} has no field '${name}'`);
+      this.checkAccess(obj.cls, name, "field");
       obj.f.set(name, v); return;
+    }
+    if (obj instanceof FwClass) {
+      const holder = defining ? obj : this.staticHolder(obj, name);
+      if (!holder || holder.statics.get(name) instanceof FwFunc) fail("TypeError", `${obj.name} has no static field '${name}'`);
+      const access = holder.staticAccess.get(name);
+      if (access && !defining) this.checkVisible(holder, name, access, "static member");
+      if (!defining && holder.constStatics && holder.constStatics.has(name)) fail("TypeError", `static field '${name}' of ${holder.name} is constant`);
+      holder.statics.set(name, v); return;
     }
     if (obj instanceof FwElement) {
       if (name === "text_content") { this.elSetText(obj, v); return; }
@@ -1871,7 +2107,7 @@ class Interp {
   /* ---------------- expressions */
   self(scope) {
     const f = scope.frame;
-    if (!f || !f.self) fail("RuntimeError", "'inst' used outside a method");
+    if (!f || !f.self) fail("RuntimeError", "'this' used outside a method");
     return f.self;
   }
   evalWithType(e, scope, type) {
@@ -1940,6 +2176,7 @@ class Interp {
       case "Self": return this.self(scope);
       case "InstField": {
         const self = this.self(scope);
+        this.checkAccess(self.cls, e.name, self.f.has(e.name) ? "field" : "method");
         if (self.f.has(e.name)) return self.f.get(e.name);
         const m = findMethod(self.cls, e.name);
         if (m) return new Bound(m, self);
@@ -1954,14 +2191,39 @@ class Interp {
         fail("RuntimeError", `component <${scope.frame.comp}> needs attribute '${e.name}'`);
       }
       case "Super": {
+        // super.name: the next implementation along the linearization of the defining class;
+        // super.Base.name picks the base; super.constructor(...) runs a base's constructor
         const f = scope.frame;
-        if (!f || !f.cls || !f.cls.base) fail("RuntimeError", "'super' used outside a subclass method");
-        const m = findMethod(f.cls.base, e.name);
+        if (!f || !f.cls || !f.cls.bases.length) fail("RuntimeError", "'super' used outside a subclass method");
+        let target = f.cls.bases[0], m;
+        if (e.base) {
+          target = this.typeRef(e.base, scope);
+          if (!(target instanceof FwClass) || target === f.cls || !mro(f.cls).includes(target)) fail("TypeError", `'${e.base}' is not a base class of ${f.cls.name}`);
+        }
+        if (e.name === "init" || e.base) m = findMethod(target, e.name);
+        else {
+          if (f.self && f.self.f.has(e.name)) return f.self.f.get(e.name);
+          m = nextMethod(f.cls, f.cls, e.name);
+        }
         if (!m) {
-          if (e.name === "init") return new Native("super.init", args => { this.generatedInit(f.cls.base, f.self, args); return null; });
-          fail("RuntimeError", `${f.cls.base.name} has no method '${e.name}'`);
+          if (e.name === "init") return new Native("super.constructor", args => { this.generatedInit(target, f.self, args); return null; });
+          fail("RuntimeError", `no base class of ${f.cls.name} has a method '${e.name}'`);
         }
         return new Bound(m, f.self);
+      }
+      case "Ternary": {
+        const c = this.eval(e.c, scope);
+        if (typeof c !== "boolean") fail("TypeError", "the condition of 'x if condition else y' must be bool");
+        return this.eval(c ? e.a : e.b, scope);
+      }
+      case "Spawn": {
+        // no threads in flywheel.js: the call runs now; join() returns its result or rethrows
+        const fn = this.eval(e.fn, scope);
+        let result = null, error = null;
+        try { result = this.call(fn, []); } catch (err) { if (err instanceof FwThrow) error = err; else throw err; }
+        const task = new Instance(TASK);
+        task.f.set("$result", result); task.f.set("$error", error);
+        return task;
       }
       case "List": {
         const items = e.items.map(i => this.eval(i, scope));
@@ -2291,10 +2553,19 @@ class Interp {
       fail("RuntimeError", `${this.typeName(obj)} has no member '${name}'`);
     }
     if (obj instanceof Instance) {
+      this.checkAccess(obj.cls, name, obj.f.has(name) ? "field" : "method");
       if (obj.f.has(name)) return obj.f.get(name);
       const m = findMethod(obj.cls, name);
       if (m) return new Bound(m, obj);
       fail("RuntimeError", `${obj.cls.name} has no member '${name}'`);
+    }
+    if (obj instanceof FwClass) {
+      const holder = this.staticHolder(obj, name);
+      if (holder) {
+        const access = holder.staticAccess.get(name);
+        if (access) this.checkVisible(holder, name, access, "static member");
+        return holder.statics.get(name);
+      }
     }
     if (obj instanceof Module) {
       if (obj.members.has(name)) return obj.members.get(name);
@@ -2330,7 +2601,12 @@ class Interp {
     fail("RuntimeError", `${this.typeName(obj)} has no member '${name}'`);
   }
   callMember(obj, name, args) {
+    if (obj instanceof Instance && obj.cls === TASK) {
+      if (name === "join") { const err = obj.f.get("$error"); if (err) throw err; return obj.f.get("$result"); }
+      if (name === "done") return true;
+    }
     if (obj instanceof Instance) {
+      this.checkAccess(obj.cls, name, obj.f.has(name) ? "field" : "method");
       if (obj.f.has(name)) return this.call(obj.f.get(name), args);
       const m = findMethod(obj.cls, name);
       if (m) return this.call(new Bound(m, obj), args);
@@ -2387,14 +2663,31 @@ class Interp {
       else fail("RuntimeError", `${fn.name} is missing argument '${ps[i].name}'`);
       s.def(ps[i].name, this.coerce(v, ps[i].type));
     }
+    const prevCls = this.curCls;
+    this.curCls = frame.cls;
     try { this.execBlock(fn.body, s); }
     catch (e) { if (e instanceof ReturnSig) return e.v; throw e; }
+    finally { this.curCls = prevCls; }
     return null;
+  }
+  // Destructors of the instances still alive run as the program ends (JavaScript cannot see
+  // when an object becomes unreachable), most derived class first.
+  finalizeAll() {
+    for (const o of this.finalizable) {
+      this.finalizable.delete(o);
+      for (const c of mro(o.cls)) {
+        const d = c.methods.get("$destroy");
+        if (!d) continue;
+        try { this.call(new Bound(d, o), []); }
+        catch (e) { if (e instanceof FwThrow) this.errOut(`Flywheel: error in the destructor of ${o.cls.name}: ${this.describeError(e.value)}`); else throw e; }
+      }
+    }
   }
   callMethod(obj, name, args) { return this.callMember(obj, name, args); }
   construct(cls, args) {
     if (cls.isInterface) fail("RuntimeError", `interface ${cls.name} cannot be constructed`);
     const o = new Instance(cls);
+    if (mro(cls).some(c => c.methods.has("$destroy"))) this.finalizable.add(o);
     const fields = this.allFields(cls);
     for (const f of fields) if (f.def) o.f.set(f.name, this.coerce(this.eval(f.def, cls.scope), f.type));
     const init = findMethod(cls, "init");
@@ -3225,7 +3518,7 @@ function makeModules(I) {
     sqrt: ([x]) => Math.sqrt(num(x)), sin: ([x]) => Math.sin(num(x)), cos: ([x]) => Math.cos(num(x)), tan: ([x]) => Math.tan(num(x)),
     asin: ([x]) => Math.asin(num(x)), acos: ([x]) => Math.acos(num(x)), atan: ([x]) => Math.atan(num(x)),
     atan2: ([y, x]) => Math.atan2(num(y), num(x)), hypot: ([x, y]) => Math.hypot(num(x), num(y)),
-    exp: ([x]) => Math.exp(num(x)), log: ([x, b]) => b === undefined ? Math.log(num(x)) : Math.log(num(x)) / Math.log(num(b)),
+    exp: ([x]) => Math.exp(num(x)), cbrt: ([x]) => Math.cbrt(num(x)), log: ([x, b]) => b === undefined ? Math.log(num(x)) : Math.log(num(x)) / Math.log(num(b)),
     log10: ([x]) => Math.log10(num(x)), log2: ([x]) => Math.log2(num(x)), pow: ([a, b]) => Math.pow(num(a), num(b)),
     floor: ([x]) => Math.floor(num(x)), ceil: ([x]) => Math.ceil(num(x)), trunc: ([x]) => Math.trunc(num(x)),
     round: ([x]) => { const v = num(x); return Math.sign(v) * Math.round(Math.abs(v)); },
@@ -3237,6 +3530,57 @@ function makeModules(I) {
     random: () => I.rng(),
     random_int: ([lo, hi]) => lo + BigInt(Math.floor(I.rng() * Number(hi - lo + 1n))),
     seed: ([n]) => { I.rng = mulberry32(Number(BigInt.asUintN(32, n))); return null; },
+    gcd: ([a, b]) => { if (typeof a !== "bigint" || typeof b !== "bigint") fail("TypeError", "math.gcd requires integer arguments"); a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) [a, b] = [b, a % b]; return ck(a); },
+    lcm: ([a, b]) => {
+      if (typeof a !== "bigint" || typeof b !== "bigint") fail("TypeError", "math.lcm requires integer arguments");
+      if (a === 0n || b === 0n) return 0n;
+      let x = a < 0n ? -a : a, y = b < 0n ? -b : b, g = x, h = y; while (h) [g, h] = [h, g % h];
+      const r = x / g * y; if (r > I64MAX) fail("NumericError", "integer overflow in math.lcm"); return r;
+    },
+    factorial: ([n]) => {
+      if (typeof n !== "bigint") fail("TypeError", "math.factorial requires an integer");
+      if (n < 0n) fail("ValueError", "math.factorial requires a non-negative integer");
+      if (n > 20n) fail("NumericError", "integer overflow in math.factorial");
+      let r = 1n; for (let i = 2n; i <= n; i++) r *= i; return r;
+    },
+    sign: ([x]) => typeof x === "bigint" ? (x > 0n ? 1n : x < 0n ? -1n : 0n) : (x > 0 ? 1 : x < 0 ? -1 : x),
+  });
+  // random: the compiler's stdlib/fw/random.fw, on the same generator as math.random
+  const rint = (lo, hi) => lo + BigInt(Math.floor(I.rng() * Number(hi - lo + 1n)));
+  const shuffleInPlace = items => {
+    for (let i = items.length - 1; i > 0; i--) { const j = Number(rint(0n, BigInt(i))); [items[i], items[j]] = [items[j], items[i]]; }
+    return items;
+  };
+  const random = mod("random", {
+    seed: ([n]) => { I.rng = mulberry32(Number(BigInt.asUintN(32, n))); return null; },
+    random: () => I.rng(),
+    integer: ([lo, hi]) => { if (lo > hi) fail("ValueError", "random.integer requires low <= high"); return rint(lo, hi); },
+    below: ([n]) => { if (n <= 0n) fail("ValueError", "random.below requires a positive bound"); return rint(0n, n - 1n); },
+    uniform: ([lo, hi]) => { if (lo > hi) fail("ValueError", "random.uniform requires low <= high"); return lo + (hi - lo) * I.rng(); },
+    chance: ([p = 0.5]) => { if (p < 0 || p > 1) fail("ValueError", "random.chance requires a probability from 0 to 1"); return I.rng() < p; },
+    normal: ([mean = 0, sd = 1]) => {
+      if (sd < 0) fail("ValueError", "random.normal requires stddev >= 0");
+      const u = 1 - I.rng(), v = I.rng();
+      return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    },
+    choice: ([items]) => { if (!items.length) fail("IndexError", "random.choice of an empty array"); return items[Number(rint(0n, BigInt(items.length - 1)))]; },
+    weighted: ([items, weights]) => {
+      if (!items.length || items.length !== weights.length) fail("ValueError", "random.weighted needs one weight per item and at least one item");
+      let total = 0;
+      for (const w of weights) { if (w < 0 || !Number.isFinite(w)) fail("ValueError", "random.weighted requires finite, non-negative weights"); total += w; }
+      if (total <= 0) fail("ValueError", "random.weighted requires a positive total weight");
+      let target = I.rng() * total, last = 0;
+      for (let i = 0; i < weights.length; i++) if (weights[i] > 0) { last = i; if (target < weights[i]) return items[i]; target -= weights[i]; }
+      return items[last];
+    },
+    shuffle: ([items]) => { shuffleInPlace(items); return null; },
+    shuffled: ([items]) => shuffleInPlace(items.slice()),
+    sample: ([items, count]) => {
+      if (count < 0n || count > BigInt(items.length)) fail("ValueError", "random.sample count must be from 0 to the array length");
+      const pool = items.slice(), out = [];
+      for (let i = 0; i < Number(count); i++) { const j = Number(rint(BigInt(i), BigInt(pool.length - 1))); [pool[i], pool[j]] = [pool[j], pool[i]]; out.push(pool[i]); }
+      return out;
+    },
   });
   const collections = mod("collections", {
     range: ([a, b]) => { let lo = 0n, hi = a; if (b !== undefined) { lo = a; hi = b; } const out = []; if (hi - lo > 10000000n) fail("NumericError", "range too large"); for (let i = lo; i < hi; i++) out.push(i); return out; },
@@ -3386,7 +3730,7 @@ function makeModules(I) {
     desktop: () => fail("ProcessError", "flywheel.desktop is not available in flywheel.js; use the playground's app pane or install Flywheel"),
     serve: () => fail("ProcessError", "flywheel.serve is not available in flywheel.js; install Flywheel to serve pages"),
   });
-  return { math, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os, flywheel };
+  return { math, random, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os, flywheel };
 }
 // Lenient HTML reader for html.parse: lower-cased names, implicit closes, raw text elements.
 function parseHtml(I, text) {
@@ -3491,7 +3835,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.4 (beta-4) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.5 (beta-5) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

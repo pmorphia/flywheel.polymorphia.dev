@@ -1,6 +1,6 @@
 # Classes and interfaces
 
-A class lists its fields and methods. Inside a method, `inst` names the object: `inst age` reads a field and `inst greet()` calls a method. The generated constructor takes the fields in order, and fields with defaults can be left out.
+A class lists its fields and methods. Inside a method, `this` is the object: `this.age` reads a field and `this.greet()` calls a method. The generated constructor takes the fields in order, and fields with defaults can be left out.
 
 ```flywheel
 class Person
@@ -8,11 +8,11 @@ class Person
     int age = 0
 
     function greet() returns string
-        return "Hello, {inst name}!"
+        return "Hello, {this.name}!"
     end
 
     function birthday()
-        inst age += 1
+        this.age += 1
     end
 end
 
@@ -23,15 +23,15 @@ print ann.greet(), bo.age
 print ann
 ```
 
-## init, private and readonly
+## Constructors, private and readonly
 
-Writing `init` replaces the generated constructor. `private` members are only visible inside the class, and `readonly` fields can only be set while constructing.
+A `constructor` block replaces the generated constructor; its parentheses are optional (`constructor double f` works too). A subclass calls its base's constructor with `super.constructor(...)`. `private` members are only visible inside the class, and `readonly` fields can only be set while constructing.
 
 ```flywheel
 class Temperature
     readonly double celsius
-    function init(double fahrenheit)
-        inst celsius = (fahrenheit - 32.0) * 5.0 / 9.0
+    constructor(double fahrenheit)
+        this.celsius = (fahrenheit - 32.0) * 5.0 / 9.0
     end
 end
 
@@ -39,10 +39,10 @@ class Account
     readonly string id
     private int balance = 0
     function deposit(int amount)
-        inst balance += amount
+        this.balance += amount
     end
     function total returns int
-        return inst balance
+        return this.balance
     end
 end
 
@@ -67,7 +67,7 @@ class Rectangle implements Shape
     double width
     double height
     function area() returns double
-        return inst width * inst height
+        return this.width * this.height
     end
     function name() returns string
         return "rectangle"
@@ -75,8 +75,8 @@ class Rectangle implements Shape
 end
 
 class Square extends Rectangle
-    function init(double side)
-        super.init(side, side)
+    constructor(double side)
+        super.constructor(side, side)
     end
     function name() returns string
         return "square"
@@ -97,13 +97,13 @@ A class can define `operator +`, `operator ==`, `operator <` and friends, plus `
 class Money
     readonly int cents
     function operator +(Money other) returns Money
-        return Money(inst cents + other.cents)
+        return Money(this.cents + other.cents)
     end
     function operator <(Money other) returns bool
-        return inst cents < other.cents
+        return this.cents < other.cents
     end
     function to_string returns string
-        return "${inst cents // 100}.{inst cents % 100:02}"
+        return "${this.cents // 100}.{this.cents % 100:02}"
     end
 end
 

@@ -447,15 +447,30 @@
           "name": "keyword.operator.logical.flywheel"
         },
         {
-          "match": "\\b(?:public|private)\\b",
+          "comment": "Access modifiers and `static` are soft keywords before a declaration on the same line.",
+          "match": "\\b(?:public|private|protected|static)\\b(?=[ \\t]+[A-Za-z_])",
           "name": "storage.modifier.flywheel"
+        },
+        {
+          "comment": "`constructor` and `destructor` (soft keywords) start a class member: `constructor(int x)`, `constructor int x`, `destructor`.",
+          "match": "^\\s*(?:(?:public|private|protected)[ \\t]+)?(constructor|destructor)\\b(?=[ \\t]*(?:\\(|#|$|[A-Za-z_]))",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.flywheel"
+            }
+          }
+        },
+        {
+          "comment": "`spawn` (a soft keyword) runs a call on a new thread: `spawn work(5)`, `spawn function() ... end`.",
+          "match": "(?<![\\w.])spawn\\b(?=[ \\t]+[A-Za-z_])",
+          "name": "keyword.control.flywheel"
         },
         {
           "match": "\\b(?:var|const|returns|function|class|component)\\b",
           "name": "storage.type.flywheel"
         },
         {
-          "match": "\\b(?:inst|attr)\\b",
+          "match": "\\b(?:this|super|attr)\\b",
           "name": "variable.language.flywheel"
         },
         {

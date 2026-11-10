@@ -59,17 +59,17 @@ end
 class Circle implements Shape
     double radius
     function area() returns double
-        return 3.14159 * inst radius * inst radius
+        return 3.14159 * this.radius * this.radius
     end
 end
 
 class Square implements Shape
     double side
-    function init(double side)
-        inst side = side
+    constructor(double side)
+        this.side = side
     end
     function area() returns double
-        return inst side * inst side
+        return this.side * this.side
     end
 end
 
@@ -103,7 +103,7 @@ print Box("generic").value
 print <ul>{shapes.map(function(Shape s) => <li>{s.area()}</li>)}</ul>
 ```
 
-The language has classes with custom `init`, `private` and `readonly` members, and operator methods; single inheritance, interfaces, enums (including enums with data), exhaustive `match` with destructuring, monomorphized generics with constraints and generic methods, nullable values (including `int?`) with `??` and null-check narrowing, `char`, closures that share captured variables, first-class methods and constructors, sets and custom map keys, frozen collections, `defer`, format specs in interpolation, and an iterator protocol. See [language decisions](docs/language.md), [types](docs/types.md), and [collections](docs/collections.md).
+The language has classes with `constructor` / `destructor` blocks, `public` / `private` / `protected`, `static` and `readonly` members, and operator methods; multiple inheritance with `super`, decorators, the `x if c else y` ternary, interfaces, enums (including enums with data), exhaustive `match` with destructuring, monomorphized generics with constraints and generic methods, nullable values (including `int?`) with `??` and null-check narrowing, `char`, closures that share captured variables, first-class methods and constructors, sets and custom map keys, frozen collections, `defer`, format specs in interpolation, and an iterator protocol. See [language decisions](docs/language.md), [types](docs/types.md), and [collections](docs/collections.md).
 
 ```flywheel
 enum Token
@@ -172,7 +172,7 @@ Values are reference counted with atomic counts and freed deterministically; a s
 
 ## Modules and errors
 
-Local `.fw` / `.fly` imports resolve first, then installed packages (`.flywheel-modules`, then the installation's `modules` directory), then library and native modules. Packages are installed by [Pulley](../pulley/README.md) (`pulley` / `ppm`) from Distrobase registries; the `flywheel` command has no package commands. Top-level declarations are public by default; `private` hides implementation names. Dependency initialization runs once, and import cycles and wildcard collisions are diagnosed. See [modules](docs/modules.md). Typed `try`/`catch`/`finally`, errors named by strings (`throw "Name" "message"`, `catch "Name" e`), `assert condition "message"`, `Result<T,E>`, and typed library errors are described in [error handling](docs/errors.md). Imports also take strings, file paths, and URLs: `import "https://example.com/lib.fw"`.
+Local `.fw` / `.fly` imports resolve first, then installed packages (`.flywheel-modules`, then the installation's `modules` directory), then library and native modules. Packages are installed by [Pulley](../pulley/README.md) (`pulley` / `ppm`) from Distrobase registries; the `flywheel` command has no package commands. Top-level declarations are public by default; `private` hides implementation names. Dependency initialization runs once, and import cycles and wildcard collisions are diagnosed. See [modules](docs/modules.md). Typed `try`/`catch`/`finally`, errors named by strings (`throw "Name" with "message"`, `catch "Name" e`), `assert condition "message"`, `Result<T,E>`, and typed library errors are described in [error handling](docs/errors.md). Imports also take strings, file paths, and URLs: `import "https://example.com/lib.fw"`.
 
 ## Development and measurements
 

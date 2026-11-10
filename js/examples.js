@@ -24,17 +24,17 @@ end
 class Circle implements Shape
     double radius
     function area() returns double
-        return 3.14159 * inst radius * inst radius
+        return 3.14159 * this.radius * this.radius
     end
 end
 
 class Square implements Shape
     double side
-    function init(double side)
-        inst side = side
+    constructor(double side)
+        this.side = side
     end
     function area() returns double
-        return inst side * inst side
+        return this.side * this.side
     end
 end
 
@@ -342,19 +342,19 @@ class Vec2
     readonly double y
 
     function operator +(Vec2 other) returns Vec2
-        return Vec2(inst x + other.x, inst y + other.y)
+        return Vec2(this.x + other.x, this.y + other.y)
     end
 
     function operator *(double k) returns Vec2
-        return Vec2(inst x * k, inst y * k)
+        return Vec2(this.x * k, this.y * k)
     end
 
     function operator ==(Vec2 other) returns bool
-        return inst x == other.x and inst y == other.y
+        return this.x == other.x and this.y == other.y
     end
 
     function to_string returns string
-        return "({inst x:.1f}, {inst y:.1f})"
+        return "({this.x:.1f}, {this.y:.1f})"
     end
 end
 
@@ -448,17 +448,17 @@ end
 `# Generic classes and functions, constraints, and the iterator protocol.
 class Stack<T>
     T[] items
-    function init()
-        inst items = []
+    constructor()
+        this.items = []
     end
     function push(T item)
-        inst items.push(item)
+        this.items.push(item)
     end
     function pop() returns T?
-        if inst items.length == 0 do
+        if this.items.length == 0 do
             return null
         end
-        return inst items.pop()
+        return this.items.pop()
     end
 end
 
@@ -475,11 +475,11 @@ end
 class Countdown
     int n
     function next() returns int?
-        if inst n == 0 do
+        if this.n == 0 do
             return null
         end
-        inst n -= 1
-        return inst n + 1
+        this.n -= 1
+        return this.n + 1
     end
 end
 
