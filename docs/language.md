@@ -171,9 +171,22 @@ Arrays infer a homogeneous common type, or use the declared element type. Empty 
 
 ## Markup
 
-Markup supports named tags, self-closing tags, and fragments. Attribute values are written as in HTML: `class="card"`, `class='card'`, unquoted `class=card` (no spaces, quotes, `=`, `<`, `>`, backticks, or braces), or `{expression}`; quoted values may interpolate (`class="item {kind}"`). An attribute without a value, such as `<input disabled>`, is an empty string, or `true` for HTML boolean attributes (`disabled={flag}` sets one conditionally). HTML void elements (`br`, `hr`, `img`, `input`, `link`, `meta`, ...) need no `/>` or closing tag. `</>` only closes a fragment. Indentation-only text containing a newline between children is discarded; other text whitespace is retained. HTML comments (`<!-- ... -->`) may appear among children; they are dropped at compile time, as `html.parse` drops them, and their contents are not interpolated. Text on both sides of a comment joins. Entities supported: `amp`, `lt`, `gt`, `quot`, `apos`, decimal numeric, and hexadecimal numeric. HTML names require `import html.*`, SVG names `import svg.*`, and other tag sets can be declared as [element families](html-dom.md#element-families). `data-*` and `aria-*` attributes are accepted everywhere. Numeric attribute values render with their usual text. `on*` attributes take inline JavaScript text, or a Flywheel function that runs in [desktop windows](desktop.md).
+Markup supports named tags, self-closing tags, and fragments. Attribute values are written as in HTML: `class="card"`, `class='card'`, unquoted `class=card` (no spaces, quotes, `=`, `<`, `>`, backticks, or braces), or `{expression}`; quoted values may interpolate (`class="item {kind}"`). An attribute without a value, such as `<input disabled>`, is an empty string, or `true` for HTML boolean attributes (`disabled={flag}` sets one conditionally). HTML void elements (`br`, `hr`, `img`, `input`, `link`, `meta`, ...) need no `/>` or closing tag. Void tags of [element families](html-dom.md#element-families) and components whose template never uses `attr inner` may also leave out the closing tag inside an enclosing element, whose closing tag ends them, as in `<cogwheel.heading name="Main"><cogwheel.conf key="a" value="1"></cogwheel.heading>`; other elements written that way are an error. A component may contain itself as a child (`<Box><Box>x</Box></Box>`); only its own template may not use it. `</>` only closes a fragment. Indentation-only text containing a newline between children is discarded; other text whitespace is retained. HTML comments (`<!-- ... -->`) may appear among children; they are dropped at compile time, as `html.parse` drops them, and their contents are not interpolated. Text on both sides of a comment joins. Entities supported: `amp`, `lt`, `gt`, `quot`, `apos`, decimal numeric, and hexadecimal numeric. HTML names require `import html.*`, SVG names `import svg.*`, and other tag sets can be declared as [element families](html-dom.md#element-families). `data-*` and `aria-*` attributes are accepted everywhere. Numeric attribute values render with their usual text. `on*` attributes take inline JavaScript text, or a Flywheel function that runs in [desktop windows](desktop.md).
 
 Components specialize from supplied concrete attribute types and must use each referenced attribute consistently across uses. `style` defaults to empty string and `inner` to an empty fragment. Other referenced attributes are required. Attribute types are checked when a component is instantiated; components that are never used still have their tags, attribute names, and void-element children checked.
+
+`void component` declares a component that is used like an HTML void element: `<Icon name="star">` needs no `/>` or closing tag, and the component takes no children. Its template cannot read `attr inner`, and children given to it are a compile error. `void` is a soft keyword here; elsewhere it keeps its meaning as a type.
+
+```flywheel
+import html.*
+void component Icon = <i class="icon icon-{attr name}"></i>
+component Rating = <p>{attr label}: <Icon name="star"> <Icon name="star"> <Icon name="star"></p>
+
+print <Rating label="Score" />
+print <Icon name="heart" />
+```
+
+Markup is delimited before declarations are parsed, so the open form `<Icon ...>` works in the module that declares the void component. A void component imported from another module (`<widgets.Icon />`, or `<Icon />` after `import widgets.*`) is written self-closing.
 
 Imports resolve local `.fw` and `.fly` modules before native modules, supporting aliases, local wildcard exports, public/private declarations, and import-cycle diagnostics. See [module resolution](modules.md).
 

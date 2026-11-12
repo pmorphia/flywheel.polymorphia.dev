@@ -56,6 +56,10 @@ const isTagChar = c => /[A-Za-z0-9_.:\-]/.test(c);
 class Source {
   constructor(text, name) {
     this.text = text; this.name = name || "main.fw";
+    // `void component Icon = ...` makes <Icon> a void tag (no `/>` or closing tag). Markup is
+    // delimited while lexing, before declarations are parsed, so the names come from a scan.
+    this.voids = new Set();
+    for (const m of text.matchAll(/(?<![A-Za-z0-9_])void[ \t]+component[ \t]+([A-Za-z_][A-Za-z0-9_]*)/g)) this.voids.add(m[1]);
     this.lineStarts = [0];
     for (let i = 0; i < text.length; i++) if (text[i] === "\n") this.lineStarts.push(i + 1);
   }
@@ -253,10 +257,13 @@ function lexMarkup(S, i) {
       }
     } else attrs.push({ name, v: null });
   }
-  if (VOID_TAGS.has(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
+  if (VOID_TAGS.has(tag) || S.voids.has(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
   const r = lexChildren(S, j, tag, tag === "style" || tag === "script");
-  return { node: { k: "El", tag, attrs, children: r.children, off: s0 }, end: r.end };
+  return { node: { k: "El", tag, attrs, children: r.children, off: s0 }, end: r.end, implicit: r.implicit };
 }
+// tags of the elements enclosing the one being read: an enclosing closing tag also ends an
+// element written without one (a void tag or component, `<conf key="a">`)
+const markupAncestors = [];
 function lexChildren(S, j, tag, raw) {
   const src = S.text, children = []; let buf = "";
   const flush = () => {
@@ -271,6 +278,7 @@ function lexChildren(S, j, tag, raw) {
       if (!raw || name === tag) {
         let q = k; while (/\s/.test(src[q] || "")) q++;
         if (src[q] !== ">") throw S.err("expected '>'", q);
+        if (name !== tag && tag && name && markupAncestors.includes(name)) { flush(); return { children, end: j, implicit: true }; }
         if (name !== tag) throw S.err(tag ? `expected </${tag}>, got </${name}>` : `expected </>, got </${name}>`, j);
         flush(); return { children, end: q + 1 };
       }
@@ -278,7 +286,13 @@ function lexChildren(S, j, tag, raw) {
     const c = src[j];
     if (!raw && src.startsWith("<!--", j)) { const e = src.indexOf("-->", j); j = e < 0 ? src.length : e + 3; continue; }
     if (!raw && c === "<" && (isTagStart(src[j + 1] || "") || src[j + 1] === ">")) {
-      flush(); const m = lexMarkup(S, j); children.push(m.node); j = m.end; continue;
+      flush();
+      markupAncestors.push(tag);
+      let m; try { m = lexMarkup(S, j); } finally { markupAncestors.pop(); }
+      children.push(m.node); j = m.end;
+      // what an unclosed void element read as children are its following siblings
+      if (m.implicit) { children.push(...m.node.children); m.node.children = []; }
+      continue;
     }
     if (c === "{" && src[j + 1] === "{") { buf += "{"; j += 2; continue; }
     if (c === "}" && src[j + 1] === "}") { buf += "}"; j += 2; continue; }
@@ -474,6 +488,8 @@ class Parser {
       if (/^(protected|static)$/.test(tk.v)) throw this.err(`'${tk.v}' applies to class members`);
       this.next(); return this.statementInner();
     }
+    // `void component Name = ...`: `void` is a soft keyword before `component`
+    if (tk.t === "id" && tk.v === "void" && this.is("kw", "component", 1)) { this.next(); return this.compDecl(true); }
     const decos = this.decorators();
     if (decos.length) {
       if (this.kw("function")) {
@@ -766,11 +782,15 @@ class Parser {
     this.expect("kw", "end"); this.endStmt();
     return { k: "Enum", name, members };
   }
-  compDecl() {
-    this.next(); const name = this.name(); this.expect("op", "=");
+  compDecl(isVoid = false) {
+    this.next(); const nameTk = this.peek(), name = this.name(); this.expect("op", "=");
     const tk = this.expect("markup");
     this.endStmt();
-    return { k: "Component", name, node: this.markup(tk.v) };
+    const node = this.markup(tk.v);
+    const usesInner = n => n && typeof n === "object" &&
+      ((n.k === "Attr" && n.name === "inner") || Object.values(n).some(usesInner));
+    if (isVoid && usesInner(node)) throw this.err(`void component ${name} has no children; 'attr inner' is not available`, nameTk);
+    return { k: "Component", name, node, isVoid };
   }
   varDecl() {
     const isConst = this.next().v === "const";
@@ -1299,7 +1319,7 @@ const TASK = new FwClass("thread.task");
 class FwEnum { constructor(name) { this.name = name; this.members = []; this.byName = new Map(); } }
 class EnumMember { constructor(en, name, index, fields) { this.en = en; this.name = name; this.index = index; this.fields = fields; this.value = null; } }
 class Module { constructor(name, members) { this.name = name; this.members = members; } }
-class Component { constructor(name, node, scope) { this.name = name; this.node = node; this.scope = scope; } }
+class Component { constructor(name, node, scope, isVoid) { this.name = name; this.node = node; this.scope = scope; this.isVoid = isVoid; } }
 class JsonVal { constructor(v) { this.v = v; } }
 class Window { constructor(title) { this.title = title; this.tree = null; } }
 
@@ -1700,7 +1720,7 @@ class Interp {
         case "Interface": { const c = new FwClass(st.name); c.isInterface = true; c.sigs = st.sigs; scope.def(st.name, c); break; }
         case "Class": { const c = new FwClass(st.name); c.decl = st; scope.def(st.name, c); break; }
         case "Enum": scope.def(st.name, this.makeEnum(st, scope)); break;
-        case "Component": this.components.set(st.name, new Component(st.name, st.node, scope)); break;
+        case "Component": this.components.set(st.name, new Component(st.name, st.node, scope, st.isVoid)); break;
         case "Import": this.doImport(st, scope); break;
       }
     }
@@ -1796,11 +1816,12 @@ class Interp {
     const root = st.path.split(".")[0];
     if (UNIT_LIBRARIES[root] && !st.wildcard) this.loadUnitLibrary(root, st.alias || root, true);
     if (root === "metric" || root === "imperial") { scope.def(st.alias || root, new Module(root, new Map())); return; }
+    if (FW_LIBRARIES[root] && !this.modules[root]) this.loadLibrary(root);
     const mod = this.modules[root];
     if (!mod) {
-      const native = ["fs", "io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
+      const native = ["io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
       if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in flywheel.js; install Flywheel to use it`));
-      throw new FwThrow(new FwError("RuntimeError", `unknown module '${st.path}'`));
+      throw new FwThrow(new FwError("RuntimeError", `module '${st.path}' not found (searched library and built-in modules; flywheel.js cannot load installed packages from .flywheel-modules: install Flywheel and Pulley to use them)`));
     }
     if (st.wildcard && (root === "html" || root === "svg")) { scope.def(root, mod); return; }    // tag sets
     if (st.wildcard) { for (const [k, v] of mod.members) scope.def(k, v); return; }
@@ -2713,6 +2734,7 @@ class Interp {
   evalMarkup(e, scope) {
     const comp = e.tag && this.components.get(e.tag);
     if (comp) {
+      if (comp.isVoid && e.children.length) fail("RuntimeError", `void component <${comp.name}> cannot have children`);
       const attrs = new Map();
       for (const a of e.attrs) attrs.set(a.name, a.v === null ? true : this.eval(a.v, scope));
       const inner = new FwElement("");
@@ -3043,6 +3065,20 @@ Interp.prototype.declareUnits = function (stmts, module, visible) {
     }
   }
   return own;
+};
+// Library modules written in Flywheel (FW_LIBRARIES): run once in their own scope, their public
+// declarations become the module's members and their components are reached as <name.tag>.
+Interp.prototype.loadLibrary = function (name) {
+  const prog = parse(FW_LIBRARIES[name], name + ".fw");
+  const scope = new Scope(this.global, null);
+  const before = new Set(this.components.keys());
+  this.hoist(prog, scope);
+  for (const [k, c] of [...this.components]) if (!before.has(k)) { this.components.delete(k); this.components.set(name + "." + k, c); }
+  const saved = this.line;
+  for (const st of prog) if (st.k !== "Component") this.execStmt(st, scope);
+  this.line = saved;
+  const hidden = new Set(prog.filter(st => st.private || st.isPrivate || (st.mods && st.mods.private)).map(st => st.name));
+  this.modules[name] = new Module(name, new Map([...scope.vars].filter(([k]) => !hidden.has(k))));
 };
 // `import metric` / `imperial` / `time`: their namespaces become visible under the import's name.
 Interp.prototype.loadUnitLibrary = function (name, alias, visible) {
@@ -3730,7 +3766,13 @@ function makeModules(I) {
     desktop: () => fail("ProcessError", "flywheel.desktop is not available in flywheel.js; use the playground's app pane or install Flywheel"),
     serve: () => fail("ProcessError", "flywheel.serve is not available in flywheel.js; install Flywheel to serve pages"),
   });
-  return { math, random, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os, flywheel };
+  // whole-file text, under Node only (the browser has no files)
+  const fsmod = mod("fs", {
+    read: ([p]) => hostFile(I, "read", str(I, p)),
+    write: ([p, t]) => { hostFile(I, "write", str(I, p), str(I, t)); return null; },
+    exists: ([p]) => { try { hostFile(I, "read", str(I, p)); return true; } catch (e) { if (e instanceof FwThrow) return false; throw e; } },
+  });
+  return { math, random, collections, time, regex, json, encoding, uuid, testing, html, svg: html, web, desktop, os, flywheel, fs: fsmod };
 }
 // Lenient HTML reader for html.parse: lower-cased names, implicit closes, raw text elements.
 function parseHtml(I, text) {
@@ -3795,6 +3837,14 @@ function sortKeys(v) {
   return v;
 }
 
+/* Library modules written in Flywheel, from the compiler's stdlib/fw (tools/sync-libraries.js
+ * copies them in): cogwheel. */
+const FW_LIBRARIES = {
+/* BEGIN LIBRARIES */
+  cogwheel: "# Cogwheel: configuration written as Markdown (.cw files).\n#\n# A .cw file is ordinary Markdown. Headings (`#` to `######`) open nested sections named by\n# their text, a quote line with `=` in it (`> name = danny`) is an entry, and everything else is\n# text. Fenced code blocks are text. Reading and writing a file keeps it as written: only the\n# entries you change are rewritten.\n#\n#     import cogwheel\n#     var conf = cogwheel.confile(\"main.cw\")\n#     print conf[\"#Main\"][\"#User Section\"][\">name\"]\n#     print conf.getById(\"User Section\").get(\"name\")\n#     print conf.selectorAll()[\">email\"]\n#\n# See https://github.com/pmorphia/cogwheel for the format.\nimport fs\n\nelements cogwheel_markup\n    cw-doc: *\n    cw-heading: name\n    cw-rawstr: *\n    cw-conf void: key, value\nend\n\n# Markup that builds a document: <cogwheel.cw><cogwheel.heading name=\"Main\">\n# <cogwheel.rawstr>Text</cogwheel.rawstr><cogwheel.conf key=\"name\" value=\"danny\">\n# </cogwheel.heading></cogwheel.cw>. `cogwheel.from_markup` turns it into a Node.\ncomponent cw = <cw-doc>{attr inner}</cw-doc>\ncomponent heading = <cw-heading name={attr name}>{attr inner}</cw-heading>\ncomponent rawstr = <cw-rawstr>{attr inner}</cw-rawstr>\ncomponent conf = <cw-conf key={attr key} value={attr value} />\n\n# A part of a document. `kind` is \"document\", \"section\", \"entry\", \"text\", or \"all\" (the view\n# returned by selectorAll, which searches every level).\nclass Node\n    string kind\n    # A section's heading text, or an entry's key.\n    string name = \"\"\n    # An entry's value.\n    string value = \"\"\n    # A section's heading level (1 to 6); 0 for the document.\n    int level = 0\n    # The source text of this node itself, with its line breaks: a heading line, an entry\n    # line, or the lines of a text block. Empty for an entry or heading that was changed.\n    string raw = \"\"\n    Node[] children = []\n    # The file a document was read from.\n    string file = \"\"\n\n    # `[\"#Name\"]` is the section named Name, `[\">key\"]` (or `[\"key\"]`) the entry key. Missing\n    # parts raise KeyError.\n    function operator [](string selector) returns Node\n        var found = this.find(selector)\n        if found == null do\n            throw KeyError(\"no {describe(selector)} in {this.label()}\")\n        end\n        return found\n    end\n\n    # The first match of a selector, or null.\n    function find(string selector) returns Node?\n        var want = parse_selector(selector)\n        bool deep = this.kind == \"all\"\n        return search(this.children, want[0], want[1], deep)\n    end\n\n    function has(string selector) returns bool\n        return this.find(selector) != null\n    end\n\n    # Every match of a selector, at this level (or every level, for selectorAll).\n    function find_all(string selector) returns Node[]\n        var want = parse_selector(selector)\n        Node[] out = []\n        collect(this.children, want[0], want[1], this.kind == \"all\", out)\n        return out\n    end\n\n    # The section with this name at any depth.\n    function getById(string id) returns Node\n        var found = search(this.children, \"section\", id.trim(), true)\n        if found == null do\n            throw KeyError(\"no section '{id}' in {this.label()}\")\n        end\n        return found\n    end\n    function get_by_id(string id) returns Node\n        return this.getById(id)\n    end\n\n    # A view of this node whose selectors search every level below it.\n    function selectorAll returns Node\n        return Node(\"all\", this.name, \"\", this.level, \"\", [this])\n    end\n    function selector_all returns Node\n        return this.selectorAll()\n    end\n\n    # Entry values. get raises KeyError when the entry is missing.\n    function get(string key) returns string\n        return this[entry_selector(key)].value\n    end\n    function get_or(string key, string fallback) returns string\n        var found = this.find(entry_selector(key))\n        if found == null do\n            return fallback\n        end\n        return found.value\n    end\n    function get_int(string key) returns int\n        var v = this.get(key).replace(\"_\", \"\")\n        try\n            return int(v)\n        catch Error e\n            throw ValueError(\"cogwheel entry '{key}' is not an integer: {v}\")\n        end\n    end\n    function get_float(string key) returns double\n        var v = this.get(key).replace(\"_\", \"\")\n        try\n            return double(v)\n        catch Error e\n            throw ValueError(\"cogwheel entry '{key}' is not a number: {v}\")\n        end\n    end\n    function get_bool(string key) returns bool\n        var v = this.get(key).lower()\n        if v == \"true\" or v == \"yes\" or v == \"on\" or v == \"1\" do\n            return true\n        end\n        if v == \"false\" or v == \"no\" or v == \"off\" or v == \"0\" do\n            return false\n        end\n        throw ValueError(\"cogwheel entry '{key}' is not true or false: {v}\")\n    end\n    # A comma-separated value, optionally in brackets: `> tags = [a, b, c]`.\n    function get_list(string key) returns string[]\n        return split_list(this.get(key))\n    end\n\n    # The sections, entries, and text blocks directly inside this one.\n    function sections returns Node[]\n        return this.children.filter(function(Node n) => n.kind == \"section\")\n    end\n    function entries returns Node[]\n        return this.children.filter(function(Node n) => n.kind == \"entry\")\n    end\n    function keys returns string[]\n        return this.entries().map(function(Node n) => n.name)\n    end\n    # The text directly in this section (or a text block's own text), without entries.\n    function text returns string\n        if this.kind == \"text\" do\n            return this.raw.trim()\n        end\n        string[] parts = []\n        for child in this.children do\n            if child.kind == \"text\" and child.raw.trim() != \"\" do\n                parts.push(child.raw.trim())\n            end\n        end\n        return \"\\n\\n\".join(parts)\n    end\n\n    # Sets an entry of this section, adding it after the last entry (or the text) when missing.\n    function set(string key, string value) returns Node\n        var found = this.find(entry_selector(key))\n        if found != null do\n            var n = found\n            n.value = value\n            n.raw = \"\"\n            return this\n        end\n        if this.kind == \"all\" do\n            throw ValueError(\"set needs a section, not a selectorAll view\")\n        end\n        int at = 0\n        for i, child in this.children do\n            if child.kind == \"section\" do\n                break\n            end\n            at = i + 1\n        end\n        Node[] added = [Node(\"entry\", key.trim(), value)]\n        this.insert_block(at, added)\n        return this\n    end\n\n    # Adds a subsection at the end of this one and returns it.\n    function add_section(string name) returns Node\n        var section = Node(\"section\", name.trim(), \"\", min_level(this.level + 1))\n        this.insert_block(this.children.length, [section])\n        return section\n    end\n\n    # Adds a text block (a paragraph) after the entries and text of this section.\n    function add_text(string text) returns Node\n        int at = 0\n        for i, child in this.children do\n            if child.kind == \"section\" do\n                break\n            end\n            at = i + 1\n        end\n        this.insert_block(at, [Node(\"text\", \"\", \"\", 0, text.trim() + \"\\n\")])\n        return this\n    end\n\n    # Removes the first match of a selector; whether there was one.\n    function remove(string selector) returns bool\n        var want = parse_selector(selector)\n        return remove_from(this, want[0], want[1], this.kind == \"all\")\n    end\n\n    # Every entry at every level, keyed by section path and key: \"Main.User Section.name\".\n    function to_map returns map<string, string>\n        map<string, string> out = {}\n        flatten(this, \"\", out)\n        return out\n    end\n\n    # The .cw text of this node: a document or section as written (with any changes), an\n    # entry's line, a text block's lines.\n    function source returns string\n        string out = \"\"\n        if this.kind == \"all\" do\n            return this.children[0].source()\n        end\n        if this.kind == \"section\" do\n            out = this.raw if this.raw != \"\" else \"#\".repeat(this.level) + \" \" + this.name + \"\\n\"\n        else if this.kind == \"document\" do\n            out = this.raw\n        else if this.kind == \"entry\" do\n            return this.raw if this.raw != \"\" else entry_line(this.name, this.value)\n        else if this.kind == \"text\" do\n            return this.raw\n        end\n        for child in this.children do\n            out += child.source()\n        end\n        return out\n    end\n\n    # Writes a document to a file: the one it was read from when no path is given.\n    function save(string path = \"\") returns void\n        var target = path if path != \"\" else this.file\n        if target == \"\" do\n            throw ValueError(\"save needs a path for a document that was not read from a file\")\n        end\n        fs.write(target, this.source())\n    end\n\n    # An entry formats as its value, a text block as its text, anything else as .cw text.\n    function to_string returns string\n        if this.kind == \"entry\" do\n            return this.value\n        end\n        if this.kind == \"text\" do\n            return this.text()\n        end\n        return this.source()\n    end\n\n    function label returns string\n        if this.kind == \"section\" do\n            return \"section '{this.name}'\"\n        end\n        if this.kind == \"all\" do\n            return this.children[0].label()\n        end\n        if this.file != \"\" do\n            return this.file\n        end\n        return \"the document\"\n    end\n\n    # Inserts nodes at a child position, keeping a blank line between blocks.\n    function insert_block(int at, Node[] nodes) returns void\n        Node[] before = []\n        Node[] after = []\n        for i, child in this.children do\n            if i < at do\n                before.push(child)\n            else do\n                after.push(child)\n            end\n        end\n        bool needs_gap = false\n        if before.length > 0 do\n            var last = before[before.length - 1]\n            needs_gap = not ends_blank(last)\n        else if this.kind == \"section\" do\n            needs_gap = true\n        end\n        if needs_gap and (before.length > 0 or this.kind == \"section\") do\n            before.push(Node(\"text\", \"\", \"\", 0, \"\\n\"))\n        end\n        for n in nodes do\n            before.push(n)\n        end\n        if after.length > 0 and not starts_blank(after[0]) do\n            before.push(Node(\"text\", \"\", \"\", 0, \"\\n\"))\n        end\n        for n in after do\n            before.push(n)\n        end\n        this.children = before\n    end\nend\n\nprivate function min_level(int level) returns int\n    return level if level <= 6 else 6\nend\n\nprivate function ends_blank(Node n) returns bool\n    if n.kind == \"section\" do\n        if n.children.length == 0 do\n            return false\n        end\n        return ends_blank(n.children[n.children.length - 1])\n    end\n    return n.kind == \"text\" and (n.raw.trim() == \"\" or n.raw.ends_with(\"\\n\\n\"))\nend\n\nprivate function starts_blank(Node n) returns bool\n    return n.kind == \"text\" and n.raw.lines().length > 0 and n.raw.lines()[0].trim() == \"\"\nend\n\n# \"#Name\" is a section, \">key\" or \"key\" an entry.\nprivate function parse_selector(string selector) returns string[]\n    var s = selector.trim()\n    if s.starts_with(\"#\") do\n        return [\"section\", s.slice(1).trim()]\n    end\n    if s.starts_with(\">\") do\n        return [\"entry\", s.slice(1).trim()]\n    end\n    return [\"entry\", s]\nend\n\nprivate function entry_selector(string key) returns string\n    var k = key.trim()\n    return k if k.starts_with(\">\") else \">\" + k\nend\n\nprivate function describe(string selector) returns string\n    var want = parse_selector(selector)\n    return \"{want[0]} '{want[1]}'\"\nend\n\nprivate function search(Node[] nodes, string kind, string name, bool deep) returns Node?\n    for n in nodes do\n        if n.kind == kind and n.name == name do\n            return n\n        end\n    end\n    if deep do\n        for n in nodes do\n            if n.kind == \"section\" or n.kind == \"document\" do\n                var found = search(n.children, kind, name, true)\n                if found != null do\n                    return found\n                end\n            end\n        end\n    end\n    return null\nend\n\nprivate function collect(Node[] nodes, string kind, string name, bool deep, Node[] out) returns void\n    for n in nodes do\n        if n.kind == kind and n.name == name do\n            out.push(n)\n        end\n        if deep and (n.kind == \"section\" or n.kind == \"document\") do\n            collect(n.children, kind, name, true, out)\n        end\n    end\nend\n\nprivate function remove_from(Node parent, string kind, string name, bool deep) returns bool\n    for i, n in parent.children do\n        if n.kind == kind and n.name == name do\n            Node[] kept = []\n            for j, other in parent.children do\n                if j != i do\n                    kept.push(other)\n                end\n            end\n            parent.children = kept\n            return true\n        end\n    end\n    if deep do\n        for n in parent.children do\n            if (n.kind == \"section\" or n.kind == \"document\") and remove_from(n, kind, name, true) do\n                return true\n            end\n        end\n    end\n    return false\nend\n\nprivate function flatten(Node n, string prefix, map<string, string> out) returns void\n    for child in n.children do\n        if child.kind == \"entry\" do\n            out[prefix + child.name] = child.value\n        else if child.kind == \"section\" do\n            flatten(child, prefix + child.name + \".\", out)\n        else if child.kind == \"document\" do\n            flatten(child, prefix, out)\n        end\n    end\nend\n\nprivate function split_list(string value) returns string[]\n    var v = value.trim()\n    if v.starts_with(\"[\") and v.ends_with(\"]\") do\n        v = v.slice(1, v.length - 1)\n    end\n    string[] out = []\n    if v.trim() == \"\" do\n        return out\n    end\n    # split on commas outside quotes\n    string item = \"\"\n    bool quoted = false\n    bool escaped = false\n    for c in v do\n        if escaped do\n            escaped = false\n        else if quoted and c == '\\\\' do\n            escaped = true\n        else if c == '\"' do\n            quoted = not quoted\n        else if c == ',' and not quoted do\n            out.push(unquote(item))\n            item = \"\"\n            continue\n        end\n        item += string(c)\n    end\n    out.push(unquote(item))\n    return out\nend\n\n# A value is written as is, or in double quotes when it has surrounding spaces, quotes, or\n# line breaks: `> greeting = \"  hi\\n\"`.\nfunction quote(string value) returns string\n    bool plain = value == value.trim() and value != \"\" and not value.starts_with(\"\\\"\") and\n        not value.contains(\"\\n\") and not value.contains(\"\\r\")\n    if plain do\n        return value\n    end\n    var escaped = value.replace(\"\\\\\", \"\\\\\\\\\").replace(\"\\\"\", \"\\\\\\\"\").replace(\"\\n\", \"\\\\n\")\n    escaped = escaped.replace(\"\\r\", \"\\\\r\").replace(\"\\t\", \"\\\\t\")\n    return \"\\\"\" + escaped + \"\\\"\"\nend\n\n# The value an entry's text stands for: quoted values have their escapes read.\nfunction unquote(string text) returns string\n    var t = text.trim()\n    if t.length < 2 or not t.starts_with(\"\\\"\") or not t.ends_with(\"\\\"\") do\n        return t\n    end\n    var chars = t.slice(1, t.length - 1).chars()\n    string out = \"\"\n    int i = 0\n    while i < chars.length do\n        var c = chars[i]\n        if c == '\\\\' and i + 1 < chars.length do\n            i += 1\n            var e = chars[i]\n            if e == 'n' do\n                out += \"\\n\"\n            else if e == 't' do\n                out += \"\\t\"\n            else if e == 'r' do\n                out += \"\\r\"\n            else do\n                out += string(e)\n            end\n        else do\n            out += string(c)\n        end\n        i += 1\n    end\n    return out\nend\n\nprivate function entry_line(string key, string value) returns string\n    return \"> {key} = {quote(value)}\\n\"\nend\n\n# The heading level and text of a line (`## Name`), or level 0.\nprivate function heading_of(string line) returns string[]\n    var t = line.trim_start()\n    if line.length - t.length > 3 or not t.starts_with(\"#\") do\n        return [\"0\", \"\"]\n    end\n    int level = 0\n    while level < t.length and t[level] == '#' do\n        level += 1\n    end\n    if level > 6 or (level < t.length and t[level] != ' ' and t[level] != '\\t') do\n        return [\"0\", \"\"]\n    end\n    var name = t.slice(level).trim()\n    # an optional closing sequence: `## Name ##`\n    var stripped = name\n    while stripped.ends_with(\"#\") do\n        stripped = stripped.slice(0, stripped.length - 1)\n    end\n    if stripped == \"\" or stripped.ends_with(\" \") or stripped.ends_with(\"\\t\") do\n        name = stripped.trim()\n    end\n    return [string(level), name]\nend\n\n# The key and value of an entry line (`> key = value`), or an empty key.\nprivate function entry_of(string line) returns string[]\n    var t = line.trim_start()\n    if line.length - t.length > 3 or not t.starts_with(\">\") do\n        return [\"\", \"\"]\n    end\n    var body = t.slice(1)\n    var eq = body.find(\"=\")\n    if eq < 0 do\n        return [\"\", \"\"]\n    end\n    var key = body.slice(0, eq).trim()\n    if key == \"\" do\n        return [\"\", \"\"]\n    end\n    return [key, unquote(body.slice(eq + 1))]\nend\n\n# The fence a line opens or closes (``` or ~~~, three or more), or \"\".\nprivate function fence_of(string line) returns string\n    var t = line.trim_start()\n    if line.length - t.length > 3 do\n        return \"\"\n    end\n    for mark in [\"`\", \"~\"] do\n        if t.starts_with(mark.repeat(3)) do\n            int n = 0\n            while n < t.length and string(t[n]) == mark do\n                n += 1\n            end\n            return mark.repeat(n)\n        end\n    end\n    return \"\"\nend\n\nprivate function split_lines(string text) returns string[]\n    # lines with their line breaks, so the source joins back exactly\n    string[] out = []\n    string current = \"\"\n    for c in text do\n        current += string(c)\n        if c == '\\n' do\n            out.push(current)\n            current = \"\"\n        end\n    end\n    if current != \"\" do\n        out.push(current)\n    end\n    return out\nend\n\n# Reads .cw text.\nfunction parse(string text) returns Node\n    var doc = Node(\"document\")\n    Node[] stack = [doc]\n    string block = \"\"\n    string fence = \"\"\n    var body = text\n    if body.starts_with(\"\\u{FEFF}\") do\n        # kept as the document's own raw text, so it is written back\n        doc.raw = \"\\u{FEFF}\"\n        body = body.slice(1)\n    end\n    for line in split_lines(body) do\n        var bare = line.replace(\"\\r\", \"\").replace(\"\\n\", \"\")\n        if fence != \"\" do\n            block += line\n            var f = fence_of(bare)\n            if f != \"\" and f.starts_with(fence) and bare.trim() == f do\n                fence = \"\"\n            end\n            continue\n        end\n        var f = fence_of(bare)\n        if f != \"\" do\n            fence = f\n            block += line\n            continue\n        end\n        var h = heading_of(bare)\n        var e = entry_of(bare)\n        if h[0] == \"0\" and e[0] == \"\" do\n            block += line\n            continue\n        end\n        var top = stack[stack.length - 1]\n        if block != \"\" do\n            top.children.push(Node(\"text\", \"\", \"\", 0, block))\n            block = \"\"\n        end\n        if h[0] != \"0\" do\n            var level = int(h[0])\n            while stack.length > 1 and stack[stack.length - 1].level >= level do\n                stack.pop()\n            end\n            var section = Node(\"section\", h[1], \"\", level, line)\n            stack[stack.length - 1].children.push(section)\n            stack.push(section)\n        else do\n            top.children.push(Node(\"entry\", e[0], e[1], 0, line))\n        end\n    end\n    if block != \"\" do\n        stack[stack.length - 1].children.push(Node(\"text\", \"\", \"\", 0, block))\n    end\n    return doc\nend\n\n# Reads a .cw file.\nfunction confile(string path) returns Node\n    var doc = parse(fs.read(path))\n    doc.file = path\n    return doc\nend\n\nprivate function markup_source(element e, int depth) returns string\n    if e.tag == \"cw-heading\" do\n        var out = \"#\".repeat(min_level(depth + 1)) + \" \" + (e.get_attribute(\"name\") ?? \"\") + \"\\n\\n\"\n        for child in e.children do\n            out += markup_source(child, depth + 1)\n        end\n        return out\n    end\n    if e.tag == \"cw-rawstr\" do\n        return e.text_content.trim() + \"\\n\\n\"\n    end\n    if e.tag == \"cw-conf\" do\n        return entry_line(e.get_attribute(\"key\") ?? \"\", e.get_attribute(\"value\") ?? \"\") + \"\\n\"\n    end\n    string out = \"\"\n    for child in e.children do\n        out += markup_source(child, depth)\n    end\n    return out\nend\n\n# The .cw text of <cogwheel.cw> markup.\nfunction render(element e) returns string\n    return markup_source(e, 0).trim_end() + \"\\n\"\nend\n\n# A document from <cogwheel.cw> markup.\nfunction from_markup(element e) returns Node\n    return parse(render(e))\nend\n",
+/* END LIBRARIES */
+};
+
 /* =========================================================================================
  * public API
  * ========================================================================================= */
@@ -3835,7 +3885,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.5 (beta-5) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.7 (beta-7) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);
