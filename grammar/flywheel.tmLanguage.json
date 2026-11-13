@@ -14,6 +14,9 @@
           "include": "#comments"
         },
         {
+          "include": "#chars"
+        },
+        {
           "include": "#strings"
         },
         {
@@ -88,6 +91,17 @@
           "end": "$"
         }
       ]
+    },
+    "chars": {
+      "comment": "A character literal: one character or one escape, such as 'a', '\"' or '\\n'; escapes match strings.",
+      "match": "(')(?:(\\\\(?:[\\\\\"nrt]|u\\{[0-9a-fA-F]+\\}))|(\\\\.)|[^'\\\\\\n])(')",
+      "name": "string.quoted.single.flywheel",
+      "captures": {
+        "1": { "name": "punctuation.definition.string.begin.flywheel" },
+        "2": { "name": "constant.character.escape.flywheel" },
+        "3": { "name": "invalid.illegal.escape.flywheel" },
+        "4": { "name": "punctuation.definition.string.end.flywheel" }
+      }
     },
     "strings": {
       "name": "string.quoted.double.flywheel",
