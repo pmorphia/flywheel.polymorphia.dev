@@ -921,14 +921,14 @@ main() {
     fi
     printf '\n%sFlywheel is installed.%s\n' "$green" "$reset"
     case ":$PATH:" in
-    *":$prefix/bin:"*) info "Try: flywheel run hello.fw  (or the short alias: fw run hello.fw)" ;;
+    *":$prefix/bin:"*) info "Try: flywheel hello.fw  (or the short alias: fw hello.fw)" ;;
     *)
         if ((modify_path)); then
             info "Open a new terminal (or run: export PATH=\"$prefix/bin:\$PATH\"), then try:"
         else
             info "Add $prefix/bin to PATH, then try:"
         fi
-        info "  echo 'print \"Hello, world!\"' > hello.fw && flywheel run hello.fw"
+        info "  echo 'print \"Hello, world!\"' > hello.fw && flywheel hello.fw"
         info "(fw is a short alias for flywheel: fw run hello.fw)"
         ;;
     esac

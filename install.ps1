@@ -439,7 +439,7 @@ function Install-Alias {
     Write-Ok 'fw -> flywheel'
 }
 
-# `flywheel run` and `flywheel build` link with MSVC, which needs the Visual Studio environment.
+# Running programs and `flywheel --build` link with MSVC, which needs the Visual Studio environment.
 # flywheel-shell opens a prompt with that environment and Flywheel on PATH.
 function Write-DeveloperShortcut {
     $vs = Find-VisualStudio
@@ -768,7 +768,7 @@ function Main {
     Write-Info '  flywheel-shell              (opens a prompt with it, from any new terminal)'
     Write-Info '  Developer PowerShell for VS 2022 (from the Start menu)'
     Write-Info 'then try:'
-    Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; flywheel run hello.fw"
+    Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; flywheel hello.fw"
     Write-Info '(fw is a short alias for flywheel: fw run hello.fw)'
     if ($wantVSCode) { Write-Info 'Restart VS Code so the extension finds flywheel on PATH.' }
 }
