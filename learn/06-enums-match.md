@@ -76,6 +76,27 @@ print judge([0, 0]), judge([4, 0]), judge([3, 3]), judge([1, 2])
 print label(Circle(2.5))
 ```
 
+## match as an expression
+
+`match` also produces a value: each case is `case pattern => value`, and the else is `else => value`. The patterns are the same, and short matches fit on one line.
+
+```flywheel
+function size(int n) returns string
+    return match n
+        case 0 => "none"
+        case 1..9 => "a few"
+        case int k if k < 100 => "{k}, many"
+        else => "lots"
+    end
+end
+
+for n in [0, 4, 42, 1000] do
+    print n, size(n)
+end
+var grade = match 87 case 90..100 => 'A' case 80..<90 => 'B' else => 'C' end
+print grade
+```
+
 ## Nullable values
 
 `T?` can hold `null`. `??` supplies a fallback, and a null check narrows the type inside the `if`.

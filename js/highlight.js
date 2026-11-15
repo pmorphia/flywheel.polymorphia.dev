@@ -121,7 +121,7 @@ const CLASSES = [
   ["punctuation.section.interpolation", "interp"], ["punctuation.definition.string", "s"],
   ["string", "s"],
   ["constant.numeric", "n"], ["constant.language", "lit"], ["constant.other.color", "n"],
-  ["keyword.control.import", "kw"], ["keyword.control", "kw"], ["keyword.operator.logical", "kw"],
+  ["keyword.control.import", "kw"], ["keyword.control", "kw"], ["keyword.operator.logical", "kw"], ["keyword.operator.type", "kw"],
   ["keyword.operator", "op"], ["keyword.other", "kw"],
   ["storage.type.function", "kw"], ["storage.type.class", "kw"], ["storage.type", "kw"], ["storage.modifier", "kw"],
   ["entity.name.function", "fn"], ["entity.name.type", "ty"], ["support.type.property-name", "attr"],

@@ -6,7 +6,7 @@
  * language that mirrors the compiler's semantics and output formatting closely enough for
  * learning and prototyping: classes, interfaces, inheritance, enums with data, exhaustive-style
  * match, generics (erased), nullable values, closures, format specs, collections, Results,
- * exceptions, defer, markup with components, and a browser-safe subset of the standard library.
+ * exceptions, defer, reactive variables (`when`, `computed`), markup with components, and a browser-safe subset of the standard library.
  *
  * Static typing is not checked here; programs that the compiler would reject may still run.
  *
@@ -38,7 +38,7 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
  * ========================================================================================= */
 const KEYWORDS = new Set(("if else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is this " +
-  "attr super null true false defer readonly elements which").split(" "));
+  "attr super null true false defer readonly elements which unless").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
   "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
 // a line ending in one of these continues onto the next line
@@ -518,7 +518,7 @@ class Parser {
         case "component": return this.compDecl();
         case "elements": { this.next(); while (!this.kw("end")) { if (this.is("eof")) throw this.err("expected 'end'"); this.next(); } this.next(); return { k: "Nop" }; }
         case "var": case "const": return this.varDecl();
-        case "if": return this.ifStmt();
+        case "if": case "unless": return this.ifStmt();
         case "while": return this.whileStmt();
         case "for": return this.forStmt();
         case "match": return this.matchStmt();
@@ -545,6 +545,12 @@ class Parser {
         }
         case "defer": {
           this.next();
+          // `defer when condition do ... end`: a deferred when, checked between statements
+          if (this.is("id", "when")) {
+            const save = this.p, st = this.statement();
+            if (st && st.k === "When") { st.deferred = true; return st; }
+            this.p = save;
+          }
           if (this.is("nl")) { this.next(); const body = this.block(["end"]); this.expect("kw", "end"); this.endStmt(); return { k: "Defer", body }; }
           const st = this.statement(); return { k: "Defer", body: [st] };
         }
@@ -592,11 +598,41 @@ class Parser {
       const c = quantity();
       this.endStmt(); return { k: "UnitConv", a, op, b, c, line: this.line(tk) };
     }
+    // `when condition do ... [else do ...] end` and `when condition run call [else run call]`
+    if (tk.t === "id" && tk.v === "when" && !this.eol1() && !(this.is("op", undefined, 1) && /^(=|\.|\(|\[|,|\+=|-=|\*=|\/=|\/\/=|%=)$/.test(this.peek(1).v))) {
+      const st = this.whenStmt();
+      if (st) return st;
+    }
+    // `reactive` and `computed` before a declaration: reactive int score = 0, computed bool won = score > 9
+    if (tk.t === "id" && (tk.v === "reactive" || tk.v === "computed") && (this.is("kw", undefined, 1) || this.is("id", undefined, 1)) && this.sameLine(0, 1)) {
+      const save = this.p;
+      this.next();
+      if (this.kw("const")) throw this.err(`'${tk.v}' declarations cannot be const`);
+      let st = null;
+      try { st = this.statementInner(); } catch (e) { if (!(e instanceof CompileError) || e.fatal) throw e; }
+      if (st && st.k === "Var") {
+        if (tk.v === "computed" && !st.value) throw this.err("a computed value needs an expression: computed T name = expression", tk);
+        st[tk.v] = true;
+        return st;
+      }
+      this.p = save;
+    }
     if (tk.t === "id" && tk.v === "assert" && !this.is("op", "=", 1) && !this.is("op", ".", 1) && !this.eol1()) return this.assertStmt();
     // typed declaration: Type name [= value]
     if (tk.t === "id" || this.op("(") || this.op("[") || (tk.t === "kw" && tk.v === "function")) {
       const save = this.p;
       const t = this.tryType();
+      if (t && this.is("id") && this.op("/", 1) && this.is("id", undefined, 2) && this.op("=", 3)) {
+        // bool enabled/disabled = true: `disabled` reads and writes the negation of `enabled`
+        const nameTk = this.next();
+        this.next();
+        const alias = this.next().v;
+        if (t.name !== "bool" || t.arr || t.opt || t.args) throw this.err("negated aliases (name/negated) are only for bool", nameTk);
+        this.next();
+        const value = this.outerExpr();
+        this.endStmt();
+        return { k: "Var", name: nameTk.v, alias, type: t, value, line: this.line(nameTk) };
+      }
       if (t && this.is("id")) {
         const nameTk = this.peek();
         const after = this.peek(1);
@@ -804,6 +840,7 @@ class Parser {
       return { k: "Destructure", names, value };
     }
     let type = null;
+    if (this.is("id") && this.op("/", 1) && this.is("id", undefined, 2)) throw this.err("negated aliases need the bool type: bool name/negated = value");
     if (!(this.is("id") && (this.op("=", 1) || this.is("nl", undefined, 1) || this.is("eof", undefined, 1)))) type = this.type();
     const name = this.name();
     let value = null;
@@ -811,6 +848,40 @@ class Parser {
     else if (!type) throw this.err("expected '=' after variable name");
     this.endStmt();
     return { k: "Var", name, type, value, isConst };
+  }
+  // `when` (a soft keyword) watches its condition; see Interp.when. Returns null when the line is
+  // not a when statement after all (a variable named `when`).
+  whenStmt() {
+    const save = this.p, line = this.line();
+    this.next();
+    let cond = null;
+    try { cond = this.expr(); } catch (e) { if (!(e instanceof CompileError) || e.fatal) throw e; }
+    if (cond && this.is("id", "run")) {
+      this.next();
+      const body = this.runBody();
+      const after = this.p;
+      while (this.is("nl") || this.op(";")) this.next();
+      if (this.kw("else")) {
+        this.next();
+        if (this.runs()) { const otherwise = this.runBody(); this.endStmt(); return { k: "When", cond, body, otherwise, line }; }
+      }
+      this.p = after; this.endStmt();
+      return { k: "When", cond, body, otherwise: null, line };
+    }
+    if (cond && this.kw("do")) {
+      this.next();
+      const body = this.block(["else", "end"]);
+      let otherwise = null;
+      if (this.accept("kw", "else")) {
+        if (this.runs()) { otherwise = this.runBody(); this.endStmt(); return { k: "When", cond, body, otherwise, line }; }
+        this.expect("kw", "do");
+        otherwise = this.block(["end"]);
+      }
+      this.expect("kw", "end"); this.endStmt();
+      return { k: "When", cond, body, otherwise, line };
+    }
+    this.p = save;
+    return null;
   }
   // `run` (a soft keyword) introduces a one-call body: `if/while/for ... run call`, no `end`.
   runs() { if (!this.is("id", "run")) return false; this.next(); return true; }
@@ -839,13 +910,13 @@ class Parser {
         const elsePos = this.p;
         this.next();
         if (this.runs()) { otherwise = this.runBody(); this.endStmt(); break; }
-        if (this.kw("if")) {
-          this.next();
+        if (this.kw("if") || this.kw("unless")) {
+          const t = this.next();
           let chained = false;
           const ifPos = this.p;
           try { this.expr(); chained = this.is("id", "run"); } catch (e) { if (!(e instanceof CompileError)) throw e; }
           this.p = ifPos;
-          if (chained) { const c = this.expr(); this.next(); branches.push({ cond: c, body: this.runBody() }); continue; }
+          if (chained) { const c = this.condition(t.v === "unless", this.line(t)); this.next(); branches.push({ cond: c, body: this.runBody() }); continue; }
         }
         this.p = elsePos;
       }
@@ -853,18 +924,21 @@ class Parser {
     }
     return { k: "If", branches, otherwise };
   }
+  // `unless c` is `if not (c)`
+  condition(negated, line) { const c = this.expr(); return negated ? { k: "Not", e: c, line } : c; }
   ifStmt() {
-    this.next();
+    const head = this.next();
     const branches = [];
-    let cond = this.expr();
+    let cond = this.condition(head.v === "unless", this.line(head));
     if (this.runs()) return this.runIf(branches, cond);
     this.expect("kw", "do");
     let body = this.block(["else", "end"]);
     branches.push({ cond, body });
     let otherwise = null;
     while (this.accept("kw", "else")) {
-      if (this.accept("kw", "if")) {
-        cond = this.expr();
+      if (this.kw("if") || this.kw("unless")) {
+        const t = this.next();
+        cond = this.condition(t.v === "unless", this.line(t));
         if (this.runs()) { const rest = this.runIf(branches, cond); return rest; }
         this.expect("kw", "do");
         branches.push({ cond, body: this.block(["else", "end"]) });
@@ -913,6 +987,32 @@ class Parser {
     this.expect("kw", "end"); this.endStmt();
     return { k: "Match", subject, cases, otherwise };
   }
+  // match as an expression: `case pattern => value` ... `else => value` ... `end`; the cases may
+  // share a line
+  matchExpr(line) {
+    return this.withNL(1, () => {
+      const subject = this.expr();
+      const cases = []; let otherwise = null;
+      for (;;) {
+        if (this.accept("kw", "case")) {
+          const pats = [];
+          this.noTernary = true;
+          try { do pats.push(this.pattern()); while (this.accept("op", ",")); } finally { this.noTernary = false; }
+          let guard = null;
+          if (this.accept("kw", "if")) guard = this.expr();
+          if (this.kw("do")) throw this.err("a match expression's cases are 'case pattern => value'; use a match statement for 'do' blocks");
+          this.expect("op", "=>");
+          cases.push({ pats, guard, value: this.expr() });
+        } else if (this.accept("kw", "else")) {
+          if (this.kw("do")) throw this.err("a match expression ends with 'else => value'");
+          this.expect("op", "=>"); otherwise = { value: this.expr() }; break;
+        } else break;
+      }
+      if (!cases.length && !otherwise) throw this.err("match requires at least one case");
+      this.expect("kw", "end");
+      return { k: "MatchExpr", subject, cases, otherwise, line };
+    });
+  }
   pattern() {
     const tk = this.peek();
     // ok v / error e
@@ -930,7 +1030,7 @@ class Parser {
       const save = this.p;
       const t = this.tryType();
       if (t && t.name !== undefined || (t && (t.arr || t.opt))) {
-        if (this.is("id") && (this.is("kw", "do", 1) || this.is("kw", "if", 1) || this.op(",", 1))) {
+        if (this.is("id") && (this.is("kw", "do", 1) || this.is("kw", "if", 1) || this.op(",", 1) || this.op("=>", 1))) {
           return { p: "Type", type: t, bind: this.next().v };
         }
       }
@@ -1039,7 +1139,7 @@ class Parser {
     const t = this.peek();
     if (t.t === "nl" || t.t === "eof") return false;
     if (t.t === "num" || t.t === "str" || t.t === "char" || t.t === "markup" || t.t === "json" || t.t === "id") return true;
-    if (t.t === "kw") return /^(true|false|null|not|function|this|attr|super)$/.test(t.v);
+    if (t.t === "kw") return /^(true|false|null|not|function|this|attr|super|match)$/.test(t.v);
     if (t.t === "op") {
       if ((t.v === "(" || t.v === "[") && t.sp) return true;
       if ((t.v === "-" || t.v === "+") && t.sp && !this.peek(1).sp) return true;
@@ -1157,6 +1257,7 @@ class Parser {
             return { k: "Super", name, base, line };
           }
           case "function": return this.lambda(line);
+          case "match": return this.matchExpr(line);
         }
         break;
       case "op":
@@ -1296,6 +1397,8 @@ function parse(text, name) {
  * ========================================================================================= */
 class FwChar { constructor(cp) { this.cp = cp; } toString() { return String.fromCodePoint(this.cp); } }
 class Tuple { constructor(items) { this.items = items; } }
+// `bool enabled/disabled = true`: the scope entry of `disabled`, which reads `not enabled`
+class NegAlias { constructor(target) { this.target = target; } }
 class Instance { constructor(cls) { this.cls = cls; this.f = new Map(); } }
 class EnumVal { constructor(en, member, fields) { this.en = en; this.member = member; this.fields = fields; } }
 class ResultVal { constructor(ok, v) { this.ok = ok; this.v = v; } }
@@ -1666,6 +1769,8 @@ class Interp {
   }
   exec(prog, repl) {
     try {
+      this.indexFunctions(prog);
+      this.regs = null;
       this.hoist(prog, this.global);
       for (const st of prog) {
         if (repl && st.k === "Expr" && !(st.e.k === "Call" && st.e.callee.k === "Ident" && st.e.callee.name === "print")) {
@@ -1675,6 +1780,7 @@ class Interp {
           continue;
         }
         this.execStmt(st, this.global);
+        if (this.settle && this.settle.length) this.settleNow();
       }
       this.finalizeAll();
       return { status: 0, value: null };
@@ -1833,13 +1939,22 @@ class Interp {
   execBlock(stmts, scope) {
     const s = new Scope(scope);
     let defers = null;
+    const prevRegs = this.regs;
+    this.regs = 0;       // the `when`s and `computed`s registered in this block, made on demand
     try {
       for (const st of stmts) {
         if (st.k === "Defer") { (defers = defers || []).push(st.body); continue; }
         this.execStmt(st, s);
+        if (this.settle && this.settle.length) this.settleNow();
       }
     } finally {
-      if (defers) for (let i = defers.length - 1; i >= 0; i--) this.execBlock(defers[i], s);
+      try {
+        if (defers) this.isolated(() => { for (let i = defers.length - 1; i >= 0; i--) this.execBlock(defers[i], s); });
+      } finally {
+        const regs = this.regs;
+        this.regs = prevRegs;
+        if (regs) this.unregister(regs);
+      }
     }
   }
   execStmt(st, scope) {
@@ -1865,8 +1980,13 @@ class Interp {
         if (st.value) { const prev = this.expectType; this.expectType = st.type; try { v = this.evalWithType(st.value, scope, st.type); } finally { this.expectType = prev; } }
         else v = this.defaultFor(st.type);
         if (st.type) v = this.coerce(v, st.type, scope);
-        scope.def(st.name, v); return;
+        scope.def(st.name, v);
+        if (st.alias) scope.def(st.alias, new NegAlias(st.name));
+        if (st.isConst) (scope.consts = scope.consts || new Set()).add(st.name);
+        if (st.computed) this.computed(st, scope);
+        return;
       }
+      case "When": this.when(st, scope); return;
       case "Destructure": {
         const v = this.eval(st.value, scope);
         const items = seqItems(v);
@@ -1938,6 +2058,7 @@ class Interp {
     const two = st.names.length === 2;
     const body = (a, b) => {
       const s = new Scope(scope);
+      s.plain = true;    // loop variables are not watched by `when`
       s.def(st.names[0], a); if (two) s.def(st.names[1], b);
       try { this.execBlock(st.body, s); }
       catch (e) { if (e === CONTINUE) return true; if (e === BREAK) return false; throw e; }
@@ -1976,6 +2097,7 @@ class Interp {
         for (const c of st.catches) {
           if (this.catchMatches(c.type, v, scope)) {
             const s = new Scope(scope);
+            s.plain = true;
             if (c.name) s.def(c.name, v);
             this.execBlock(c.body, s);
             return;
@@ -2000,6 +2122,7 @@ class Interp {
     for (const c of st.cases) {
       for (const pat of c.pats) {
         const s = new Scope(scope);
+        s.plain = true;
         if (this.matchPat(pat, v, s) && (!c.guard || this.cond(c.guard, s))) { this.execBlock(c.body, s); return; }
       }
     }
@@ -2055,6 +2178,186 @@ class Interp {
   }
 
   /* ---------------- assignment */
+  /* ---------------- reactive variables: `when`, `computed`
+   * A variable's watchers live on its scope (scope.w, by name); a field's on the interpreter
+   * (fieldWatch, by field name, whatever the object). `when` and `computed` find their
+   * dependencies from the names and fields their expression reads, and from what the functions
+   * and methods it calls read (top-level variables and fields), as the compiler does. */
+  indexFunctions(prog) {
+    const funcs = new Map(), methods = new Map();
+    const add = (m, f) => { if (!m.has(f.name)) m.set(f.name, []); m.get(f.name).push(f); };
+    for (const st of prog) {
+      if (st.k === "Func") add(funcs, st);
+      else if (st.k === "Class") for (const m of [...(st.methods || []), ...(st.staticMethods || [])]) if (m && m.name) add(methods, m);
+    }
+    this.fnIndex = { funcs, methods, reads: new Map() };
+    this.fieldWatch = this.fieldWatch || new Map();
+  }
+  scanReads(n, r, locals) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) this.scanReads(x, r, locals); return; }
+    if (Object.getPrototypeOf(n) !== Object.prototype) return;     // runtime values cached on nodes
+    const local = name => locals && locals.has(name);
+    switch (n.k) {
+      case "Ident": if (!local(n.name)) r.names.add(n.name); return;
+      case "InstField": r.fields.add(n.name); return;
+      case "Member": r.fields.add(n.name); this.scanReads(n.e, r, locals); return;
+      case "Call": {
+        const c = n.callee, idx = this.fnIndex;
+        if (c.k === "Ident" && !local(c.name)) {
+          if (idx.funcs.has(c.name)) for (const f of idx.funcs.get(c.name)) r.calls.add(f);
+          else r.names.add(c.name);       // a function-valued variable
+        } else if (c.k === "Member" || c.k === "InstField") {
+          if (idx.methods.has(c.name)) for (const f of idx.methods.get(c.name)) r.calls.add(f);
+          if (c.k === "Member") this.scanReads(c.e, r, locals);
+        } else this.scanReads(c, r, locals);
+        this.scanReads(n.args, r, locals);
+        return;
+      }
+      case "Assign": {                     // the target is written: only its object and index are read
+        const t = n.target;
+        if (t.k === "Member") this.scanReads(t.e, r, locals);
+        else if (t.k === "Index") { this.scanReads(t.e, r, locals); this.scanReads(t.index, r, locals); }
+        this.scanReads(n.value, r, locals);
+        return;
+      }
+      case "Func": case "Class": return;
+    }
+    for (const key in n) if (key !== "k" && key !== "line" && key !== "type" && key !== "ret") this.scanReads(n[key], r, locals);
+  }
+  declaredNames(n, out) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) this.declaredNames(x, out); return; }
+    if (Object.getPrototypeOf(n) !== Object.prototype) return;
+    if (n.k === "Var") out.add(n.name);
+    if ((n.k === "Destructure" || n.k === "For") && n.names) for (const x of n.names) out.add(x);
+    if (n.k === "Lambda") for (const p of n.params || []) out.add(p.name);
+    if (n.k === "Try") for (const c of n.catches || []) if (c.name) out.add(c.name);
+    if (n.p === "Bind") out.add(n.name);
+    if (n.p === "Result" && n.bind) out.add(n.bind);
+    for (const key in n) if (key !== "k" && key !== "line" && key !== "type" && key !== "ret") this.declaredNames(n[key], out);
+  }
+  // Everything the called functions read, following their calls in turn.
+  calledReads(calls) {
+    const out = { names: new Set(), fields: new Set() }, seen = new Set(), work = [...calls];
+    while (work.length) {
+      const f = work.pop();
+      if (seen.has(f)) continue;
+      seen.add(f);
+      let r = this.fnIndex.reads.get(f);
+      if (!r) {
+        const locals = new Set((f.params || []).map(p => p.name));
+        this.declaredNames(f.body, locals);
+        r = { names: new Set(), fields: new Set(), calls: new Set() };
+        this.scanReads(f.body, r, locals);
+        this.fnIndex.reads.set(f, r);
+      }
+      for (const x of r.names) out.names.add(x);
+      for (const x of r.fields) out.fields.add(x);
+      for (const g of r.calls) work.push(g);
+    }
+    return out;
+  }
+  // The watcher lists an expression depends on, in order of first use.
+  dependencies(e, scope, what) {
+    const r = { names: new Set(), fields: new Set(), calls: new Set() };
+    this.scanReads(e, r, null);
+    const lists = [];
+    const add = l => { if (!lists.includes(l)) lists.push(l); };
+    const watchable = (s, n) => {
+      if (!s || s.plain || (s.consts && s.consts.has(n))) return false;
+      if (s === this.global && this.fnIndex.funcs.has(n)) return false;
+      const v = s.vars.get(n);
+      return !(v instanceof Module || v instanceof FwClass || v instanceof FwEnum || v instanceof Native);
+    };
+    const varList = (s, n) => {
+      s.w = s.w || new Map();
+      if (!s.w.has(n)) s.w.set(n, []);
+      return s.w.get(n);
+    };
+    const fieldList = n => { if (!this.fieldWatch.has(n)) this.fieldWatch.set(n, []); return this.fieldWatch.get(n); };
+    const target = (s, n) => { const v = s && s.vars.get(n); return v instanceof NegAlias ? v.target : n; };
+    for (const n of r.names) { const s = scope.lookup(n), m = target(s, n); if (watchable(s, m)) add(varList(s, m)); }
+    for (const f of r.fields) add(fieldList(f));
+    const deep = this.calledReads(r.calls);
+    for (const n of deep.names) { const s = this.global.vars.has(n) ? this.global : null, m = target(s, n); if (watchable(s, m)) add(varList(s, m)); }
+    for (const f of deep.fields) add(fieldList(f));
+    if (!lists.length) fail("RuntimeError", `${what} must read a variable or a field, such as \`alive\` in \`when alive do\`; parameters and loop variables are not watched`);
+    return lists;
+  }
+  notifyVar(s, name) {
+    const l = s.w && s.w.get(name);
+    if (l && l.length) for (const f of l.slice()) f();
+  }
+  notifyField(name) {
+    const l = this.fieldWatch && this.fieldWatch.get(name);
+    if (l && l.length) for (const f of l.slice()) f();
+  }
+  // The scope of the variable an assignment into `xs[i]` or `p.x` changes, for its watchers.
+  assignRoot(t, scope) {
+    let e = t;
+    while ((e.k === "Member" || e.k === "Index") && e.e) e = e.e;
+    if (e.k !== "Ident") return null;
+    const s = scope.lookup(e.name);
+    if (!s) return null;
+    if (s.computedNames && s.computedNames.has(e.name)) fail("TypeError", `cannot assign into computed value '${e.name}'; it follows its expression`);
+    if (!s.w || !s.w.has(e.name)) return null;
+    return { w: s.w, rootName: e.name };
+  }
+  // Runs `f` outside any deferred-when settling: watchers and bodies are like calls.
+  isolated(f) {
+    const prev = this.settle;
+    this.settle = null;
+    try { return f(); } finally { this.settle = prev; }
+  }
+  settleNow() { for (const f of this.settle.slice()) f(); }
+  register(entry) {
+    if (this.regs === null || this.regs === undefined) return;   // the top level watches for the whole program
+    (this.regs = this.regs || []).push(entry);
+  }
+  unregister(regs) {
+    for (const { deps, watcher, settle } of regs) {
+      for (const l of deps) { const i = l.indexOf(watcher); if (i >= 0) l.splice(i, 1); }
+      if (settle && this.settle) { const i = this.settle.indexOf(settle); if (i >= 0) this.settle.splice(i, 1); }
+    }
+  }
+  // when cond do body else do otherwise end: body runs on each false -> true change of cond (and
+  // at once when it is already true), otherwise on each true -> false change. A deferred when's
+  // watchers only mark it pending; it is checked after each statement of the code that follows.
+  when(st, scope) {
+    const deps = this.dependencies(st.cond, scope, "a 'when' condition");
+    let armed = true, pending = false;
+    const check = () => this.isolated(() => {
+      if (this.cond(st.cond, scope)) {
+        if (armed) { armed = false; this.execBlock(st.body, scope); }
+      } else if (!armed) {
+        armed = true;
+        if (st.otherwise) this.execBlock(st.otherwise, scope);
+      }
+    });
+    const watcher = st.deferred ? () => { pending = true; } : check;
+    for (const l of deps) l.push(watcher);
+    check();
+    let settle = null;
+    if (st.deferred) {
+      settle = () => { if (pending) { pending = false; check(); } };
+      (this.settle = this.settle || []).push(settle);
+    }
+    this.register({ deps, watcher, settle });
+  }
+  // computed T name = expr: recomputed (and its own watchers run) when what expr reads changes.
+  computed(st, scope) {
+    const deps = this.dependencies(st.value, scope, "a computed value");
+    (scope.computedNames = scope.computedNames || new Set()).add(st.name);
+    const update = () => this.isolated(() => {
+      let v = this.evalWithType(st.value, scope, st.type);
+      if (st.type) v = this.coerce(v, st.type, scope);
+      scope.vars.set(st.name, v);
+      this.notifyVar(scope, st.name);
+    });
+    for (const l of deps) l.push(update);
+    this.register({ deps, watcher: update, settle: null });
+  }
   assign(st, scope) {
     const t = st.target;
     const compute = old => {
@@ -2066,24 +2369,42 @@ class Interp {
       case "Ident": {
         const s = scope.lookup(t.name);
         if (!s) fail("RuntimeError", `unknown variable '${t.name}'`);
+        if (s.computedNames && s.computedNames.has(t.name)) fail("TypeError", `cannot assign to computed value '${t.name}'; it follows its expression`);
         const old = s.vars.get(t.name);
-        s.vars.set(t.name, st.op === "=" ? compute() : compute(old)); return;
+        if (old instanceof NegAlias) {
+          if (st.op !== "=") fail("TypeError", `'${t.name}' is a negated alias of '${old.target}'; assign it with =`);
+          s.vars.set(old.target, !compute());
+          if (s.w) this.notifyVar(s, old.target);
+          return;
+        }
+        s.vars.set(t.name, st.op === "=" ? compute() : compute(old));
+        if (s.w) this.notifyVar(s, t.name);
+        return;
       }
       case "InstField": {
         const self = this.self(scope);
         if (!self.f.has(t.name) && !this.allFields(self.cls).some(f => f.name === t.name)) fail("RuntimeError", `${self.cls.name} has no field '${t.name}'`);
         this.checkAccess(self.cls, t.name, "field");
-        self.f.set(t.name, st.op === "=" ? compute() : compute(self.f.get(t.name))); return;
+        self.f.set(t.name, st.op === "=" ? compute() : compute(self.f.get(t.name)));
+        this.notifyField(t.name);
+        return;
       }
       case "Member": {
+        const root = this.assignRoot(t, scope);
         const obj = this.eval(t.e, scope);
         const old = st.op === "=" ? undefined : this.member(obj, t.name);
-        this.setMember(obj, t.name, st.op === "=" ? compute() : compute(old)); return;
+        this.setMember(obj, t.name, st.op === "=" ? compute() : compute(old));
+        this.notifyField(t.name);
+        if (root) this.notifyVar(root, root.rootName);
+        return;
       }
       case "Index": {
+        const root = this.assignRoot(t, scope);
         const obj = this.eval(t.e, scope), idx = this.eval(t.index, scope);
         const old = st.op === "=" ? undefined : this.index(obj, idx);
-        this.setIndex(obj, idx, st.op === "=" ? compute() : compute(old)); return;
+        this.setIndex(obj, idx, st.op === "=" ? compute() : compute(old));
+        if (root) this.notifyVar(root, root.rootName);
+        return;
       }
     }
   }
@@ -2188,7 +2509,7 @@ class Interp {
       }
       case "Ident": {
         const s = scope.lookup(e.name);
-        if (s) return s.vars.get(e.name);
+        if (s) { const v = s.vars.get(e.name); return v instanceof NegAlias ? !s.vars.get(v.target) : v; }
         if (this.builtins.has(e.name)) return this.builtins.get(e.name);
         this.line = e.line || this.line;
         fail("RuntimeError", `unknown name '${e.name}'`);
@@ -2231,6 +2552,17 @@ class Interp {
           fail("RuntimeError", `no base class of ${f.cls.name} has a method '${e.name}'`);
         }
         return new Bound(m, f.self);
+      }
+      case "MatchExpr": {
+        const v = this.eval(e.subject, scope);
+        for (const c of e.cases)
+          for (const pat of c.pats) {
+            const s = new Scope(scope);
+            s.plain = true;
+            if (this.matchPat(pat, v, s) && (!c.guard || this.cond(c.guard, s))) return this.eval(c.value, s);
+          }
+        if (e.otherwise) return this.eval(e.otherwise.value, scope);
+        fail("RuntimeError", `no case matched ${this.show(v, true)}`);
       }
       case "Ternary": {
         const c = this.eval(e.c, scope);
@@ -2675,6 +3007,7 @@ class Interp {
     const frame = { self: self || (fn.isMethod ? null : null), cls: fn.cls, attrs: null };
     if (!self && fn.closure && fn.closure.frame) { frame.self = fn.closure.frame.self; frame.cls = fn.cls || fn.closure.frame.cls; frame.attrs = fn.closure.frame.attrs; frame.comp = fn.closure.frame.comp; }
     const s = new Scope(fn.closure, frame);
+    s.plain = true;      // parameters are not watched by `when`
     const ps = fn.params;
     if (args.length > ps.length) fail("RuntimeError", `${fn.name} takes ${ps.length} argument${ps.length === 1 ? "" : "s"}, got ${args.length}`);
     for (let i = 0; i < ps.length; i++) {
@@ -2684,11 +3017,12 @@ class Interp {
       else fail("RuntimeError", `${fn.name} is missing argument '${ps[i].name}'`);
       s.def(ps[i].name, this.coerce(v, ps[i].type));
     }
-    const prevCls = this.curCls;
+    const prevCls = this.curCls, prevSettle = this.settle;
     this.curCls = frame.cls;
+    this.settle = null;  // a deferred `when` is checked between the statements after it, not inside calls
     try { this.execBlock(fn.body, s); }
     catch (e) { if (e instanceof ReturnSig) return e.v; throw e; }
-    finally { this.curCls = prevCls; }
+    finally { this.curCls = prevCls; this.settle = prevSettle; }
     return null;
   }
   // Destructors of the instances still alive run as the program ends (JavaScript cannot see
@@ -3885,7 +4219,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.7 (beta-7) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.9 (beta-9) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

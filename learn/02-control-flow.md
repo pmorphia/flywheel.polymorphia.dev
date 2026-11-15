@@ -28,6 +28,22 @@ for index, word in ["zero", "one", "two"] do
 end
 ```
 
+## unless
+
+`unless condition` is `if not (condition)`. It takes `else do` (and `else if` / `else unless`), and `run` bodies too.
+
+```flywheel
+bool raining = false
+unless raining do
+    print "no umbrella needed"
+else do
+    print "take an umbrella"
+end
+
+int tries = 2
+unless tries > 3 run print("try again")
+```
+
 ## One-call bodies with run
 
 When a branch or loop body is a single function call, write it after `run` instead of `do` … `end`. There's no `end`, and the body can't be an assignment or a keyword statement such as `return`. As with any call statement, the parentheses are optional: `run show` calls `show()`.
