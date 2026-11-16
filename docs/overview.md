@@ -2,7 +2,7 @@
 
 A C++20 compiler that turns Flywheel source into LLVM IR, native object files, and executables. Native markup and components become compiled element construction with escaped HTML serialization. Programs require neither Python nor a runtime interpreter.
 
-Flywheel is currently in its **beta** phase: version **2.9 (beta-9)** (`flywheel --version`).
+Flywheel is currently in its **beta** phase: version **2.26 (beta-26)** (`flywheel --version`).
 
 ## Build
 
@@ -98,12 +98,12 @@ for shape in shapes do
 end
 
 int? best = null
-print best ?? 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
+print best otherwise 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
 print Box("generic").value
 print <ul>{shapes.map(function(Shape s) => <li>{s.area()}</li>)}</ul>
 ```
 
-The language has classes with `constructor` / `destructor` blocks, `public` / `private` / `protected`, `static` and `readonly` members, and operator methods; multiple inheritance with `super`, decorators, the `x if c else y` ternary, interfaces, enums (including enums with data), exhaustive `match` with destructuring, monomorphized generics with constraints and generic methods, nullable values (including `int?`) with `??` and null-check narrowing, `char`, closures that share captured variables, first-class methods and constructors, sets and custom map keys, frozen collections, `defer`, format specs in interpolation, and an iterator protocol. See [language decisions](docs/language.md), [types](docs/types.md), and [collections](docs/collections.md).
+The language has classes with `constructor` / `destructor` blocks, `public` / `private` / `protected`, `static` and `readonly` members, and operator methods; multiple inheritance with `super`, decorators, the `x if c else y` ternary, interfaces, enums (including enums with data), exhaustive `match` with destructuring, monomorphized generics with constraints and generic methods, nullable values (including `int?`) with `otherwise` and null-check narrowing, `char`, closures that share captured variables, first-class methods and constructors, sets and custom map keys, frozen collections, `defer`, format specs in interpolation, and an iterator protocol. See [language decisions](docs/language.md), [types](docs/types.md), and [collections](docs/collections.md).
 
 ```flywheel
 enum Token

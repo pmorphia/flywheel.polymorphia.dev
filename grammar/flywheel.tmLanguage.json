@@ -596,7 +596,7 @@
           "name": "storage.modifier.reactive.flywheel"
         },
         {
-          "match": "\\b(?:and|or|not|which)\\b",
+          "match": "\\b(?:and|or|not|which|otherwise)\\b",
           "name": "keyword.operator.logical.flywheel"
         },
         {

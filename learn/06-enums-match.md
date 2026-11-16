@@ -11,7 +11,7 @@ end
 var c = Color.Green
 print c, c.name, c.value
 print Color.values()
-print Color.from_name("Blue") ?? Color.Red
+print Color.from_name("Blue") otherwise Color.Red
 ```
 
 ## Enums with data
@@ -99,7 +99,7 @@ print grade
 
 ## Nullable values
 
-`T?` can hold `null`. `??` supplies a fallback, and a null check narrows the type inside the `if`.
+`T?` can hold `null`. `otherwise` supplies a fallback, and a null check narrows the type inside the `if`.
 
 ```flywheel
 function find(int[] xs, int x) returns int?
@@ -112,7 +112,7 @@ function find(int[] xs, int x) returns int?
 end
 
 var at = find([4, 8, 15], 8)
-print at ?? -1, find([4], 9) ?? -1
+print at otherwise -1, find([4], 9) otherwise -1
 if at != null do
     print "found at", at + 1
 end

@@ -237,7 +237,7 @@ end
 var c = Color.Green
 print c, c.name, c.value    # Green Green 1
 print Color.values()        # [Red, Green, Blue]
-print Color.from_name("Blue") ?? Color.Red
+print Color.from_name("Blue") otherwise Color.Red
 ```
 
 Members are separated by commas or newlines. Enum values are compact integers (`.value` is the member index), print as their member name, support `==` and `!=`, and can be map keys, set elements, and JSON values (encoded by name). `int(c)` converts explicitly. `Color.from_name(text)` returns `Color?`.
@@ -418,7 +418,7 @@ Any type can be made nullable with `?`: `int?`, `double?`, `bool?`, `char?`, `Co
 
 ```flywheel
 int? port = null
-print port ?? 8080          # ?? supplies a fallback when the left side is null
+print port otherwise 8080    # `otherwise` supplies a fallback when the left side is null
 if port != null do
     print port + 1          # narrowed to int
 end
@@ -432,11 +432,11 @@ function find(int[] xs, int x) returns int?
 end
 ```
 
-Nullable primitives store present values in a small heap box, so `int?` costs an allocation; `null` costs nothing. `==` and `!=` compare presence and value (`a == 5` is false for null). Arithmetic and ordering need non-null operands: check for null, use `??`, or cast with `int(x)` (which raises `CastError` for null).
+Nullable primitives store present values in a small heap box, so `int?` costs an allocation; `null` costs nothing. `==` and `!=` compare presence and value (`a == 5` is false for null). Arithmetic and ordering need non-null operands: check for null, use `otherwise`, or cast with `int(x)` (which raises `CastError` for null).
 
 Null checks narrow variables in `if`, `while`, and the right side of `and`/`or`: `if x != null do`, `while item != null do`, and `x != null and x > 0`. After `if x == null do return end` (an early exit), the rest of the block sees `x` as non-null. Narrowed reads are null-checked, so narrowing stays sound even if the variable is reassigned. Member access on a nullable class value is also checked automatically.
 
-`a ?? b` evaluates `b` only when `a` is null. The result is non-null unless `b` is nullable too.
+`a otherwise b` evaluates `b` only when `a` is null. The result is non-null unless `b` is nullable too. A line that ends in `otherwise` continues on the next. (Before Flywheel 2.25 this was written `a ?? b`; `??` is now a compile error that suggests `otherwise`.)
 
 ## Characters and strings
 

@@ -63,7 +63,7 @@ for shape in shapes do
 end
 
 int? best = null
-print best ?? 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
+print best otherwise 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
 print Box("generic").value
 print <ul>{shapes.map(function(Shape s) => <li>{s.area()}</li>)}</ul>
 `},
@@ -486,7 +486,7 @@ end
 Stack<string> names = Stack()
 names.push("first")
 names.push("second")
-print names.pop() ?? "empty", names.pop() ?? "empty", names.pop() ?? "empty"
+print names.pop() otherwise "empty", names.pop() otherwise "empty", names.pop() otherwise "empty"
 
 print largest([3, 9, 2]), largest(["pear", "apple", "plum"])
 
@@ -497,6 +497,193 @@ print "liftoff"
 
 var squares = (1..5).map(function(int x) => x * x)
 print squares, squares.reduce(0, function(int a, int b) => a + b)
+`},
+{ id: "match", name: "match.fw", title: "Match expressions and unless", code:
+`# A match expression produces the value of the case that matches; \`unless c\` is \`if not (c)\`.
+enum Shape
+    Circle(double radius)
+    Rect(double width, double height)
+    Empty
+end
+
+function area(Shape s) returns double
+    return match s
+        case Shape.Circle(r) => 3.0 * r * r
+        case Shape.Rect(w, h) => w * h
+        case Shape.Empty => 0.0
+    end
+end
+
+function size(int n) returns string
+    return match n
+        case 0 => "none"
+        case 1..9 => "a few"
+        case int k if k < 100 => "{k}, many"
+        else => "lots"
+    end
+end
+
+print area(Shape.Rect(2.0, 3.0)), area(Shape.Circle(1.0)), area(Shape.Empty)
+for n in [0, 4, 42, 1000] do
+    print n, size(n)
+end
+
+# Short ones fit on one line.
+var grade = match 87 case 90..100 => 'A' case 80..<90 => 'B' else => 'C' end
+Result<int, string> parsed = Result.error("not a number")
+print grade, match parsed case ok v => "got {v}" case error e => "failed: {e}" end
+
+bool ready = false
+unless ready do
+    print "not ready yet"
+else do
+    print "ready"
+end
+int tries = 3
+unless tries > 5 run print("still trying")
+unless tries == 3 do
+    print "unexpected"
+else unless tries > 3 do
+    print "exactly three tries"
+end
+`},
+{ id: "reactive", name: "reactive.fw", title: "Reactive variables", code:
+`# Reactive variables: \`when\` runs its body each time a condition becomes true, and its \`else\`
+# body each time the condition becomes false again. \`computed\` values follow their expression.
+
+reactive bool playerAlive/playerDead = true
+when playerDead do
+    print "Game over!"
+else do
+    print "back in the game"
+end
+playerAlive = false
+playerAlive = true
+
+int score = 0
+computed bool winning = score >= 10
+when winning run print "winning with", score
+score += 4
+score += 7
+score = 0
+score = 12
+
+# A condition can read fields: it is checked again whenever a field of that name is assigned.
+class Player
+    string name
+    int health = 10
+    function hit(int n) returns void
+        this.health -= n
+    end
+end
+var hero = Player("Ann")
+when hero.health <= 0 run print hero.name, "is down"
+hero.hit(4)
+hero.hit(7)
+
+# It can call functions: what they read counts too.
+var x = 0
+var y = 0
+function far() returns bool
+    return x * x + y * y > 25
+end
+when far() run print "far away at", x, y
+x = 3
+y = 5
+
+# \`defer when\` is checked between statements, so a change made and undone inside one call is
+# never seen, and a change left behind is seen once the call returns.
+var height = 0.0
+defer when height < -10 do
+    print "fell from", height
+    height = 0
+end
+function wobble() returns void
+    height = -20
+    height = 5
+end
+function drop() returns void
+    height = -15
+    print "dropping"
+end
+wobble()
+drop()
+print "height", height
+`},
+{ id: "units", name: "units.fw", title: "Units of measure", code:
+`# Units of measure: the metric, imperial, and time libraries, and units of your own.
+import metric
+import imperial
+import time
+
+float[metric.length] trip = 12.5km
+print trip in m, trip / 30min in kmph          # 12500m 25kmph
+print 3m * 4m, 3m * 4m * 2m in l               # 12m2 24000l
+
+float[imperial.length] run = 5mi
+print run in ft, run / 40min in mph            # 26400ft 7.5mph
+print 1m + 1ft, 1ft + 1m, 5ft in cm              # the second value in the first one's unit
+
+# A namespace of your own; units apply to every numeric type.
+unitns data
+unit data.B = 1
+unit data.KB = 1000
+unit data.MB = 1000000
+i64[data] download = 250MB
+u8[data] header = 64B
+print download + header, download in KB, type(download), unitns(header)
+
+int[time] wait = 90s
+print wait in min, wait < 2min, [1s, 1min, 1h]
+
+# time.sleep takes seconds or a time quantity, converted to seconds
+int[time] pause = 20ms
+var start = time.monotonic()
+time.sleep pause
+time.sleep (pause in s).value
+print time.monotonic() - start >= 0.04
+`},
+{ id: "snapshots", name: "snapshots.fw", title: "Snapshots: deep_copy and seeded random", code:
+`# Saving and restoring a whole game state with deep_copy, with a seeded random.Generator of its
+# own so the replay after a restore rolls the same numbers.
+import random
+import hot
+
+class Fighter
+    string name
+    int health = 100
+    int[] combo = []
+end
+class Match
+    Fighter[] fighters = []
+    random.Generator rng = random.Generator(7)
+    int tick = 0
+end
+
+function play(Match m, int ticks)
+    for i in 0..<ticks do
+        m.tick += 1
+        var target = m.fighters[m.rng.below(2)]
+        var damage = m.rng.integer(5, 12)
+        target.health -= damage
+        target.combo.push(damage)
+    end
+end
+
+var m = Match()
+m.fighters.push(Fighter("Ryo"))
+m.fighters.push(Fighter("Kei"))
+play(m, 3)
+var saved = deep_copy(m)
+play(m, 4)
+var first = "{m.fighters[0].health} {m.fighters[1].health} {m.fighters[0].combo}"
+print "after 7 ticks:", first
+m = deep_copy(saved)
+print "restored to tick", m.tick, m.fighters[0].health, m.fighters[1].health
+play(m, 4)
+print "replayed:", "{m.fighters[0].health} {m.fighters[1].health} {m.fighters[0].combo}" == first
+print "saved copy untouched:", saved.tick, saved.fighters[0].combo
+print "hot reload here:", hot.enabled()
 `},
 ];
 root.FW_EXAMPLES = EXAMPLES;
