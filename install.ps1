@@ -83,6 +83,8 @@ $MicromambaUrl = 'https://github.com/mamba-org/micromamba-releases/releases/down
 $MicromambaSha256 = 'a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0'
 $ToolsRoot = Join-Path $env:LOCALAPPDATA 'flywheel-install'
 $CondaEnv = Join-Path $ToolsRoot 'env'
+# The Visual Studio installation whose developer environment the build runs in (set by Install-BuildTools).
+$VisualStudio = $null
 $PythonMinimum = [version]'3.12'
 $NodeMinimum = 22
 
@@ -333,6 +335,7 @@ function Install-BuildTools {
     if ($vs) {
         Write-Ok "Visual Studio C++ tools ($vs)"
         Enter-DeveloperShell $vs
+        $script:VisualStudio = $vs
     }
 
     if ($LlvmDir) {
@@ -403,6 +406,10 @@ function Install-Flywheel {
         "-DFLYWHEEL_DESKTOP=$($Desktop.ToUpper())", '-Wno-dev')
     if ($LlvmDir) { $configure += "-DLLVM_DIR=$LlvmDir" }
     else { $configure += "-DCMAKE_PREFIX_PATH=$CondaEnv;$(Join-Path $CondaEnv 'Library')" }
+    # LLVM names diaguids.lib by the path it had on LLVM's build machine; Flywheel's CMake points it
+    # at this Visual Studio's DIA SDK instead.
+    $diaSdk = if ($script:VisualStudio) { Join-Path $script:VisualStudio 'DIA SDK' }
+    if ($diaSdk -and (Test-Path $diaSdk)) { $configure += "-DFLYWHEEL_DIA_SDK_DIR=$diaSdk" }
     Write-Info 'This takes a few minutes; the first build also downloads SQLite and Mbed TLS.'
     Invoke-Native cmake $configure -Quiet
     Invoke-Build cmake @('--build', $build, '--parallel', [string][Environment]::ProcessorCount)
