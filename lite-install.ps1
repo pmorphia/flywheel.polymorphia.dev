@@ -63,8 +63,8 @@ param(
 # runs, so a partially downloaded copy does nothing.
 & {
 
-$LiteRepo = 'https://github.com/fwlang/flywheel-lite'
-$FlywheelRepo = 'https://github.com/fwlang/flywheel'
+$LiteRepo = 'https://github.com/pmorphia/flywheel-lite'
+$FlywheelRepo = 'https://github.com/pmorphia/flywheel'
 # Used when CMakeLists.txt does not list them (it is the source of truth).
 $DefaultModules = @('csv', 'url', 'log', 'args', 'bigint', 'decimal')
 # Nested calls from native code into the VM use the C stack; Windows defaults to 1 MB.

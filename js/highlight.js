@@ -1,5 +1,5 @@
 /* Flywheel syntax highlighting with the grammar from the VS Code extension
- * (github.com/fwlang/vscode-flywheel, syntaxes/flywheel.tmLanguage.json).
+ * (github.com/pmorphia/vscode-flywheel, syntaxes/flywheel.tmLanguage.json).
  *
  * A small TextMate engine: begin/end/match rules, includes, captures, contentName and
  * back-references in end patterns, run line by line like an editor does. The grammar's

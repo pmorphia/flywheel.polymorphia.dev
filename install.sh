@@ -14,9 +14,9 @@
 
 set -euo pipefail
 
-FLYWHEEL_REPO="${FLYWHEEL_REPO:-https://github.com/fwlang/flywheel}"
-PULLEY_REPO="${PULLEY_REPO:-https://github.com/fwlang/pulley}"
-VSCODE_REPO="${VSCODE_REPO:-https://github.com/fwlang/vscode-flywheel}"
+FLYWHEEL_REPO="${FLYWHEEL_REPO:-https://github.com/pmorphia/flywheel}"
+PULLEY_REPO="${PULLEY_REPO:-https://github.com/pmorphia/pulley}"
+VSCODE_REPO="${VSCODE_REPO:-https://github.com/pmorphia/vscode-flywheel}"
 EXTENSION_ID="fwlang.flywheel-language"
 LLVM_MIN=21
 LLVM_MAX=23

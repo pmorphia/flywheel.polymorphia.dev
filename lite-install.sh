@@ -14,8 +14,8 @@
 
 set -euo pipefail
 
-LITE_REPO="${LITE_REPO:-https://github.com/fwlang/flywheel-lite}"
-FLYWHEEL_REPO="${FLYWHEEL_REPO:-https://github.com/fwlang/flywheel}"
+LITE_REPO="${LITE_REPO:-https://github.com/pmorphia/flywheel-lite}"
+FLYWHEEL_REPO="${FLYWHEEL_REPO:-https://github.com/pmorphia/flywheel}"
 PATH_MARK="# >>> flywheel-lite >>>"
 PATH_END="# <<< flywheel-lite <<<"
 

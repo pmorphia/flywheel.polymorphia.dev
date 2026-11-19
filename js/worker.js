@@ -1,7 +1,7 @@
 /* Runs Flywheel programs off the main thread, so a runaway loop can be stopped by terminating
  * the worker. The interpreter stays alive after a run so event handlers in the app preview can
  * call back into the program (as in `flywheel desktop`); the app re-renders after each event.
- * flywheel.js is a copy of github.com/fwlang/flywheel.js; update it from there. */
+ * flywheel.js is a copy of github.com/pmorphia/flywheel.js; update it from there. */
 importScripts("flywheel.js");
 
 let I = null, appRoot = null, handlers = [], session = null, buffer = [], runId = 0;

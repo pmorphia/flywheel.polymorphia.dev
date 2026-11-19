@@ -74,9 +74,9 @@ param(
 # runs, so a partially downloaded copy does nothing.
 & {
 
-$FlywheelRepo = 'https://github.com/fwlang/flywheel'
-$PulleyRepo = 'https://github.com/fwlang/pulley'
-$VSCodeRepo = 'https://github.com/fwlang/vscode-flywheel'
+$FlywheelRepo = 'https://github.com/pmorphia/flywheel'
+$PulleyRepo = 'https://github.com/pmorphia/pulley'
+$VSCodeRepo = 'https://github.com/pmorphia/vscode-flywheel'
 $ExtensionId = 'fwlang.flywheel-language'
 $LlvmPackage = 'llvmdev=21.1.8'
 $MicromambaUrl = 'https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64.exe'

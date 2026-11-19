@@ -19,7 +19,7 @@ const INSTALL = {
     kind: "sh", label: "Linux", url: "install.sh", file: "install.sh",
     cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash",
     all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
-    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)"\ncmake --build build --parallel',
+    src: 'git clone https://github.com/pmorphia/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)"\ncmake --build build --parallel',
     run: "in a terminal",
     note: "Builds with your distribution's LLVM 21–23 and CMake; asks before using sudo for packages.",
   },
@@ -27,7 +27,7 @@ const INSTALL = {
     kind: "ps1", label: "Windows", url: "install.ps1", file: "install.ps1",
     cmd: "irm https://flywheel.polymorphia.dev/install.ps1 | iex",
     all: "& ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/install.ps1))) -All",
-    src: 'git clone https://github.com/fwlang/flywheel; cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="<path to LLVM>\\lib\\cmake\\llvm"\ncmake --build build --parallel',
+    src: 'git clone https://github.com/pmorphia/flywheel; cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="<path to LLVM>\\lib\\cmake\\llvm"\ncmake --build build --parallel',
     run: "in PowerShell",
     note: "No administrator rights needed; it fetches LLVM, CMake and Ninja privately. To build by hand use an x64 Visual Studio developer shell.",
   },
@@ -35,7 +35,7 @@ const INSTALL = {
     kind: "sh", label: "macOS", url: "install.sh", file: "install.sh",
     cmd: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash",
     all: "curl -fsSL https://flywheel.polymorphia.dev/install.sh | bash -s -- --all",
-    src: 'git clone https://github.com/fwlang/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" -DCMAKE_PREFIX_PATH="$(brew --prefix)"\ncmake --build build --parallel',
+    src: 'git clone https://github.com/pmorphia/flywheel && cd flywheel\ncmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" -DCMAKE_PREFIX_PATH="$(brew --prefix)"\ncmake --build build --parallel',
     run: "in Terminal",
     note: "Builds with Homebrew's LLVM 21–23, CMake and Ninja, and Apple's Command Line Tools; offers to install them first. No sudo needed.",
   },
@@ -45,28 +45,28 @@ const LITE_SH = "curl -fsSL https://flywheel.polymorphia.dev/lite-install.sh | b
 const LITE_INSTALL = {
   linux: {
     kind: "sh", label: "Linux", url: "lite-install.sh", file: "lite-install.sh", cmd: LITE_SH,
-    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
+    src: "git clone https://github.com/pmorphia/flywheel && cd flywheel\ngit clone https://github.com/pmorphia/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
     run: "in a terminal",
     note: "Needs only a C compiler and make; asks before using sudo to install them.",
   },
   windows: {
     kind: "ps1", label: "Windows", url: "lite-install.ps1", file: "lite-install.ps1",
     cmd: "irm https://flywheel.polymorphia.dev/lite-install.ps1 | iex",
-    src: "git clone https://github.com/fwlang/flywheel; cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite; cd flywheel-lite\ncmake -S . -B build\ncmake --build build --config Release",
+    src: "git clone https://github.com/pmorphia/flywheel; cd flywheel\ngit clone https://github.com/pmorphia/flywheel-lite; cd flywheel-lite\ncmake -S . -B build\ncmake --build build --config Release",
     run: "in PowerShell",
     note: "No administrator rights needed. Builds with Visual Studio's C compiler, or MinGW gcc if that is on PATH; offers to install the Build Tools if neither is found.",
   },
   macos: {
     kind: "sh", label: "macOS", url: "lite-install.sh", file: "lite-install.sh", cmd: LITE_SH,
-    src: "git clone https://github.com/fwlang/flywheel && cd flywheel\ngit clone https://github.com/fwlang/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
+    src: "git clone https://github.com/pmorphia/flywheel && cd flywheel\ngit clone https://github.com/pmorphia/flywheel-lite && cd flywheel-lite\nmake && make install PREFIX=~/.local   # flywheel-lite + fwl",
     run: "in Terminal",
     note: "Builds with Apple's Command Line Tools (clang and make) and offers to install them if they are missing.",
   },
 };
 const JS_INSTALL = {
   tag: '<script src="https://flywheel.polymorphia.dev/js/flywheel.js"></script>\n<script>\n  Flywheel.run(\'print "Hello from {1 + 1} worlds"\', { print: console.log });\n</script>',
-  npx: "npx github:fwlang/flywheel.js run main.fw",
-  npm: "npm install github:fwlang/flywheel.js",
+  npx: "npx github:pmorphia/flywheel.js run main.fw",
+  npm: "npm install github:pmorphia/flywheel.js",
   file: "js/flywheel.js",
 };
 const platform = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "").toLowerCase();
@@ -517,7 +517,7 @@ const term = (() => {
         openInstall(undefined, a[0] === "lite" ? "lite" : a[0] === "js" || a[0] === "flywheel.js" ? "js" : "flywheel");
     } },
     { name: "github", alias: ["gh"], desc: "Flywheel on GitHub", args: ["flywheel", "pulley", "vscode-flywheel"], run(a) {
-        open("https://github.com/fwlang/" + (a[0] || "flywheel"));
+        open("https://github.com/pmorphia/" + (a[0] || "flywheel"));
     } },
     { name: "share", desc: "copy a link to the editor's program", run() { $("#shareBtn").click(); } },
     { name: "stop", desc: "stop the running program", run() { if (!stopProgram("stopped")) line(`<span class="o-dim">nothing is running</span>`); } },
@@ -738,7 +738,7 @@ const docSide = $("#docSide"), docEl = $("#doc"), docScroll = $("#docScroll");
     if (d.group !== group) { group = d.group; html += `<h4>${esc(group)}</h4>`; }
     html += `<a href="#/docs/${d.id}" data-doc="${d.id}">${esc(d.title)}</a>`;
   }
-  html += `<p class="src">The language docs come from <a href="https://github.com/fwlang/flywheel/tree/main/docs" target="_blank" rel="noopener">fwlang/flywheel</a>. Code samples run in the playground.</p>`;
+  html += `<p class="src">The language docs come from <a href="https://github.com/pmorphia/flywheel/tree/main/docs" target="_blank" rel="noopener">pmorphia/flywheel</a>. Code samples run in the playground.</p>`;
   docSide.innerHTML = html;
 }
 function docLink(href) {
@@ -746,10 +746,10 @@ function docLink(href) {
   const [path, anchor] = href.split("#");
   if (!path) return `#/docs/${currentDoc || "overview"}${anchor ? "/" + anchor : ""}`;
   const base = path.split("/").pop().replace(/\.md$/, "");
-  if (/pulley/.test(path)) return "https://github.com/fwlang/pulley";
+  if (/pulley/.test(path)) return "https://github.com/pmorphia/pulley";
   let id = base;
   if (base === "README") id = /stdlib/.test(path) ? "library" : "overview";
-  if (!DOCS.some(d => d.id === id)) return "https://github.com/fwlang/flywheel/blob/main/" + path.replace(/^(\.\.\/)+/, "");
+  if (!DOCS.some(d => d.id === id)) return "https://github.com/pmorphia/flywheel/blob/main/" + path.replace(/^(\.\.\/)+/, "");
   return `#/docs/${id}${anchor ? "/" + anchor : ""}`;
 }
 async function showDoc(id, anchor) {
@@ -829,7 +829,7 @@ function paintInstall() {
       <div class="methods">
         ${method("In your browser", "this page is the playground", `<div class="irow"><button class="btn ibtn" type="button" id="jsPlay">▶ Open the playground</button><a class="btn" href="#/learn" id="jsLearn">Start the tutorial</a></div>`, true)}
         ${method("Script tag", "add it to any web page", cmdBox(JS_INSTALL.tag, "tag"))}
-        ${method("Download the file", "dependency-free, MIT licensed", `<div class="irow"><a class="btn ibtn" href="${JS_INSTALL.file}" download="flywheel.js">↓ Download flywheel.js</a><a class="btn" href="https://github.com/fwlang/flywheel.js" target="_blank" rel="noopener">GitHub ↗</a></div>`)}
+        ${method("Download the file", "dependency-free, MIT licensed", `<div class="irow"><a class="btn ibtn" href="${JS_INSTALL.file}" download="flywheel.js">↓ Download flywheel.js</a><a class="btn" href="https://github.com/pmorphia/flywheel.js" target="_blank" rel="noopener">GitHub ↗</a></div>`)}
         ${method("Node command line", "run, check, export, debug, serve, repl", cmdBox(JS_INSTALL.npx, "npx") + `<p class="inote">Or add it to a project: <code>${esc(JS_INSTALL.npm)}</code></p>`)}
       </div>
       <p class="inote">Static type checking, files, networking, databases and native imports need the real compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;

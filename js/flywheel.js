@@ -1,7 +1,7 @@
 /* flywheel.js — the Flywheel language in JavaScript.
- * https://github.com/fwlang/flywheel.js · MIT licence
+ * https://github.com/pmorphia/flywheel.js · MIT licence
  *
- * The real Flywheel compiler (github.com/fwlang/flywheel) is C++ on LLVM and produces native
+ * The real Flywheel compiler (github.com/pmorphia/flywheel) is C++ on LLVM and produces native
  * executables, so it cannot run in a browser. flywheel.js is a tree-walking interpreter for the
  * language that mirrors the compiler's semantics and output formatting closely enough for
  * learning and prototyping: classes, interfaces, inheritance, enums with data, exhaustive-style
