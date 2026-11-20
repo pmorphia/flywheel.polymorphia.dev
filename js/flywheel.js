@@ -20,7 +20,10 @@
  * errors and control signals
  * ========================================================================================= */
 class FwError { constructor(type, message) { this.type = type; this.message = message; } get name() { return this.type; } }
-class FwThrow { constructor(value) { this.value = value; } }          // a Flywheel exception in flight
+let activeInterp = null;  // the interpreter running now: a thrown error records its traceback
+class FwThrow {           // a Flywheel exception in flight
+  constructor(value) { this.value = value; this.trace = activeInterp ? activeInterp.traceFor(value) : null; }
+}
 class CompileError extends Error {
   constructor(msg, line, col) { super(msg); this.line = line; this.col = col; }
 }
@@ -318,6 +321,115 @@ const UNIT_NUMBERS = new Set("int float double i8 i16 i32 i64 u8 u16 u32 u64 f32
 const PRIM_TYPES = new Set("int float double string bool char void element fragment i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 any".split(" "));
 const ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "//=", "%="]);
 
+/* =========================================================================================
+ * diagnostics: tracebacks and compile errors with source excerpts, as the Flywheel compiler and
+ * Flywheel Lite print them
+ *
+ *   Flywheel runtime error: NumericError: integer division by zero
+ *     at main.fw:2:14 in divide
+ *       2 | return a // b
+ *         |        ~~^^~~
+ *
+ * A report is a plain object (it crosses postMessage): { kind: "runtime" | "compile", type,
+ * message, frames: [{ file, fn, line, col, sline, scol, eline, ecol, text }], omitted, omittedAt }.
+ * line:col is the failing node itself (an operator, a member, a call), sline:scol..eline:ecol
+ * (end exclusive) its whole expression; columns count from 1; `text` is the source line.
+ * ========================================================================================= */
+const TRACE_FRAMES = 64;
+function frameOf(node, fn) {
+  const S = node && node.$S;
+  if (!S) return { file: "main.fw", fn, line: node && node.line || 0, col: 0, sline: 0, scol: 0, eline: 0, ecol: 0, text: "" };
+  const at = S.pos(node.f0 !== undefined ? node.f0 : node.s0), a = S.pos(node.s0), b = S.pos(node.e0);
+  return { file: S.name, fn, line: at.line, col: at.col, sline: a.line, scol: a.col, eline: b.line, ecol: b.col, text: lineText(S.text, at.line) };
+}
+function lineText(text, line) {
+  if (!text) return "";
+  let start = 0;
+  for (let l = 1; l < line; l++) { const nl = text.indexOf("\n", start); if (nl < 0) return ""; start = nl + 1; }
+  const nl = text.indexOf("\n", start);
+  return text.slice(start, nl < 0 ? text.length : nl).replace(/\r$/, "");
+}
+function compileReport(e, name, src) {
+  return { kind: "compile", type: "", message: e.message, frames: [{ file: name, fn: "", line: e.line || 0, col: e.col || 1, sline: 0, scol: 0, eline: 0, ecol: 0, text: lineText(src, e.line) }], omitted: 0, omittedAt: 0 };
+}
+// The end (exclusive, 0-based) of the token at `at`: a name or number, a quoted literal, or operator characters.
+function tokenEnd(s, at) {
+  if (at >= s.length) return at + 1;
+  const c = s[at];
+  let e = at + 1;
+  if (/[\p{L}\p{N}_]/u.test(c)) { while (e < s.length && (/[\p{L}\p{N}_]/u.test(s[e]) || (/\d/.test(c) && s[e] === "."))) e++; }
+  else if (c === '"' || c === "'") { while (e < s.length && s[e] !== c) e += s[e] === "\\" ? 2 : 1; e = Math.min(e + 1, s.length); }
+  else if ("+-*/%=<>!&|^~?:.".includes(c)) { while (e < s.length && e < at + 3 && "+-*/%=<>!&|^~?:.".includes(s[e])) e++; }
+  return e;
+}
+// The marked parts of a frame's source line (indentation removed): { line, before, span: [pre, focus, post], after }
+// with `~` under pre/post and `^` under focus (all `^` when the node starts its expression).
+function excerptParts(f) {
+  const raw = (f.text || "").replace(/\s+$/, "");
+  const ind = raw.length - raw.replace(/^[ \t]+/, "").length;
+  if (!f.text || ind === raw.length || !f.line) return null;
+  const n = raw.length;
+  let focus = Math.min(Math.max(f.col > 0 ? f.col - 1 : ind, ind), n), start, end;
+  if (f.eline > 0) {
+    start = f.sline < f.line ? ind : f.sline === f.line && f.scol > 0 ? f.scol - 1 : focus;
+    end = f.eline > f.line ? n : f.ecol > 0 ? f.ecol - 1 : n;
+  } else { start = focus; end = tokenEnd(raw, focus); }
+  start = Math.max(start, ind);
+  if (focus < start || focus >= end) start = Math.min(start, focus);
+  end = Math.min(end, n);
+  if (end <= start) end = start + 1;
+  const fend = Math.min(tokenEnd(raw, focus), end);
+  const whole = focus === start;
+  return { start, end, focus, fend, whole, ind, raw };
+}
+const width = s => { let w = 0; for (const ch of s) w += ch === "\t" ? 4 : 1; return w; };
+const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[1;31m", magenta: "\x1b[1;35m", cyan: "\x1b[36m", blue: "\x1b[34m" };
+// The text of a report; `color` adds ANSI colors, `source: false` leaves out the source lines.
+function formatDiagnostic(r, opts) {
+  opts = opts || {};
+  const c = opts.color ? ANSI : { reset: "", bold: "", dim: "", red: "", magenta: "", cyan: "", blue: "" };
+  const paint = (code, t) => code ? code + t + c.reset : t;
+  const shown = opts.shownPath || (p => p);
+  const out = [];
+  const frames = r.frames || [];
+  if (r.kind === "compile") {
+    const f = frames[0];
+    out.push((f ? paint(c.bold, `${shown(f.file)}:${f.line}:${f.col || 1}:`) + " " : "") + paint(c.red, "error:") + " " + paint(c.bold, r.message));
+  } else {
+    out.push(paint(c.red, "Flywheel runtime error:") + " " + (r.type ? paint(c.magenta, r.type) + (r.bare ? "" : ": " + paint(c.bold, r.message || "exception")) : paint(c.bold, r.message || "exception")));
+  }
+  const gutter = Math.max(1, ...frames.map(f => String(f.line).length));
+  const atLine = f => "  " + paint(c.dim, "at") + " " + paint(c.cyan, `${shown(f.file)}:${f.line}:${f.col || 1}`) + " " + paint(c.dim, "in") + " " + paint(c.bold, f.fn);
+  const same = (a, b) => a.file === b.file && a.fn === b.fn && a.line === b.line && a.col === b.col;
+  let covered = false;
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    if (r.omitted && i === r.omittedAt && !covered) out.push(paint(c.dim, `  ... ${r.omitted} more frame${r.omitted === 1 ? "" : "s"} ...`));
+    let repeats = 0, hidden = 0;
+    while (i + repeats + 1 < frames.length && same(f, frames[i + repeats + 1])) {
+      if (r.omitted && i + repeats + 1 === r.omittedAt) hidden = r.omitted;
+      repeats++;
+    }
+    if (r.kind !== "compile") out.push(atLine(f));
+    const x = opts.source === false ? null : excerptParts(f);
+    if (x) {
+      const { raw, ind, start, end, focus, fend, whole } = x;
+      const show = t => t.replace(/\t/g, "    ");
+      out.push("    " + paint(c.blue, `${String(f.line).padStart(gutter)} |`) + " " + show(raw.slice(ind, start)) + paint(c.bold, show(raw.slice(start, end))) + show(raw.slice(end)));
+      const marks = (whole ? "^" : "~").repeat(width(raw.slice(start, focus))) + "^".repeat(Math.max(1, width(raw.slice(focus, fend)))) + (whole ? "^" : "~").repeat(width(raw.slice(fend, end)));
+      out.push("    " + paint(c.blue, `${" ".repeat(gutter)} |`) + " " + " ".repeat(width(raw.slice(ind, start))) + paint(c.red, marks));
+    }
+    if (repeats >= 3) {
+      out.push(atLine(frames[i + 1]), atLine(frames[i + 2]));
+      const more = repeats - 2 + hidden;
+      out.push(paint(c.dim, `  ... the same call ${more} more time${more === 1 ? "" : "s"} ...`));
+      covered = covered || !!hidden;
+      i += repeats;
+    }
+  }
+  return out.join("\n");
+}
+
 class Parser {
   constructor(S, toks, nl) { this.S = S; this.toks = toks; this.p = 0; this.skipNL = nl ? 0 : 1; }
   idx(o) {
@@ -332,6 +444,16 @@ class Parser {
   }
   peek(o) { return this.toks[this.idx(o)]; }
   next() { const i = this.idx(0); this.p = i + 1; return this.toks[i]; }
+  // The source range of a node, for tracebacks: s0 (its first token) to e0 (the end of the last
+  // token taken), with f0 the node's own token (an operator, a member name) when it is not s0.
+  span(e, s, f) {
+    if (!e || typeof e !== "object" || e.s0 !== undefined) return e;
+    const last = this.toks[this.p - 1];
+    if (!last || last.t === "nl" || last.t === "eof" || last.e === undefined || s === undefined) return e;
+    e.s0 = s; e.e0 = last.e; e.$S = this.S;
+    if (f !== undefined && f !== s) e.f0 = f;
+    return e;
+  }
   is(t, v, o) { const k = this.peek(o); return k.t === t && (v === undefined || k.v === v); }
   op(v, o) { return this.is("op", v, o); }
   kw(v, o) { return this.is("kw", v, o); }
@@ -477,9 +599,21 @@ class Parser {
 
   /* ---------------- statements */
   statement() {
-    const tk = this.peek(), line = this.line(tk);
+    const tk = this.peek(), line = this.line(tk), start = this.p;
     const st = this.statementInner();
-    if (st) st.line = st.line || line;
+    if (st) {
+      st.line = st.line || line;
+      // a statement's range is its first line (a block's header)
+      if (st.s0 === undefined) {
+        const lineEnd = line < this.S.lineStarts.length ? this.S.lineStarts[line] : Infinity;
+        let end;
+        for (let i = start; i < this.p && i < this.toks.length; i++) {
+          const t = this.toks[i];
+          if (t.t !== "nl" && t.t !== "eof" && t.s >= tk.s && t.e <= lineEnd) end = t.e;
+        }
+        if (end !== undefined) { st.s0 = tk.s; st.e0 = end; st.$S = this.S; }
+      }
+    }
     return st;
   }
   statementInner() {
@@ -1113,7 +1247,7 @@ class Parser {
     if (tk.t === "id" && tk.v === "spawn" && (this.is("id", undefined, 1) || this.kw("function", 1)) && this.sameLine(0, 1)) return this.expr();
     if (tk.t === "id" || (tk.t === "kw" && (tk.v === "this" || tk.v === "super"))) {
       const save = this.p;
-      let head = this.postfix(this.primary(), true);
+      let head = this.postfix(this.span(this.primary(), tk.s), true, tk.s);
       if ((head.k === "Ident" || head.k === "Member" || head.k === "InstField") && this.op("(") && this.peek().sp) {
         const after = this.p;
         try {
@@ -1121,14 +1255,14 @@ class Parser {
           const args = this.withNL(1, () => { const a = []; while (!this.op(")")) { a.push(this.expr()); if (!this.accept("op", ",")) break; } this.expect("op", ")"); return a; });
           const nt = this.peek();
           const continues = this.binOp() || this.op(",") || (nt.t === "op" && /^[.\[(?]$/.test(nt.v)) || nt.t === "str" || nt.t === "id" || nt.t === "num";
-          if (!continues) return { k: "Call", callee: head, args, outer: true, line: this.line(tk) };
+          if (!continues) return this.span({ k: "Call", callee: head, args, outer: true, line: this.line(tk) }, tk.s);
         } catch (e) { if (!(e instanceof CompileError)) throw e; }
         this.p = after;
       }
       if ((head.k === "Ident" || head.k === "Member" || head.k === "InstField") && this.canStartOuterArg()) {
         const args = [];
         do args.push(this.expr()); while (this.accept("op", ","));
-        return { k: "Call", callee: head, args, outer: true, line: this.line(tk) };
+        return this.span({ k: "Call", callee: head, args, outer: true, line: this.line(tk) }, tk.s);
       }
       // not an outer call: re-parse normally (spaced ( or [ were left for us)
       this.p = save;
@@ -1149,8 +1283,9 @@ class Parser {
   // `items which condition` keeps the items for which the condition holds. It binds looser than every
   // other operator and chains left to right: `xs which > 1 which < 9`.
   expr(minPrec) {
-    let e = this.infix(this.unary(), minPrec || 0);
-    while (!minPrec && this.peek().t === "kw" && this.peek().v === "which") e = this.which(e);
+    const s0 = this.peek().s;
+    let e = this.span(this.infix(this.unary(), minPrec || 0), s0);
+    while (!minPrec && this.peek().t === "kw" && this.peek().v === "which") e = this.span(this.which(e), s0);
     // x if condition else y: the lowest precedence, right associative
     if (!minPrec && !this.noTernary && this.kw("if")) {
       const tk = this.next();
@@ -1159,7 +1294,7 @@ class Parser {
       try { cond = this.expr(); } finally { this.noTernary = saved; }
       if (!this.kw("else")) throw this.err("'x if condition' needs 'else': x if condition else y");
       this.next();
-      e = { k: "Ternary", c: cond, a: e, b: this.expr(), line: this.line(tk) };
+      e = this.span({ k: "Ternary", c: cond, a: e, b: this.expr(), line: this.line(tk) }, s0);
     }
     return e;
   }
@@ -1184,10 +1319,10 @@ class Parser {
     if (tk.t === "op" && (tk.v === "-" || tk.v === "+")) {
       this.next();
       const operand = this.infix(this.unary(), 9);
-      return { k: "Unary", op: tk.v, e: operand, line: this.line(tk) };
+      return this.span({ k: "Unary", op: tk.v, e: operand, line: this.line(tk) }, tk.s);
     }
-    if (tk.t === "kw" && tk.v === "not") { this.next(); return { k: "Not", e: this.expr(2), line: this.line(tk) }; }
-    return this.postfix(this.primary());
+    if (tk.t === "kw" && tk.v === "not") { this.next(); return this.span({ k: "Not", e: this.expr(2), line: this.line(tk) }, tk.s); }
+    return this.postfix(this.span(this.primary(), tk.s), undefined, tk.s);
   }
   binOp() {
     const t = this.peek();
@@ -1202,10 +1337,10 @@ class Parser {
       if (!op) return left;
       const prec = BIN[op];
       if (prec <= minPrec) return left;
-      const tk = this.next(), line = this.line(tk);
+      const tk = this.next(), line = this.line(tk), s0 = left && left.s0 !== undefined ? left.s0 : tk.s;
       if (op === "is" || op === "as") {
         const type = this.type();
-        left = { k: op === "is" ? "Is" : "As", e: left, type, line };
+        left = this.span({ k: op === "is" ? "Is" : "As", e: left, type, line }, s0, tk.s);
         continue;
       }
       if (prec === 3 || (prec === 4 && op !== "in")) {
@@ -1213,11 +1348,11 @@ class Parser {
         while (this.binOp() && BIN[this.binOp()] === prec && this.binOp() !== "in" && this.binOp() !== "is") {
           ops.push(this.next().v); items.push(this.expr(prec));
         }
-        left = ops.length === 1 ? { k: "Bin", op, l: items[0], r: items[1], line } : { k: "Chain", ops, items, line };
+        left = this.span(ops.length === 1 ? { k: "Bin", op, l: items[0], r: items[1], line } : { k: "Chain", ops, items, line }, s0, tk.s);
         continue;
       }
       const right = this.expr(prec);
-      left = op === "and" || op === "or" ? { k: "Logic", op, l: left, r: right, line } : { k: "Bin", op, l: left, r: right, line };
+      left = this.span(op === "and" || op === "or" ? { k: "Logic", op, l: left, r: right, line } : { k: "Bin", op, l: left, r: right, line }, s0, tk.s);
     }
   }
   primary() {
@@ -1319,15 +1454,17 @@ class Parser {
     });
     return { k: "Lambda", params, ret, body, line };
   }
-  postfix(e, head) {
+  postfix(e, head, s0) {
+    if (s0 === undefined) s0 = e && e.s0;
     for (;;) {
+      if (e && e.s0 === undefined && s0 !== undefined) this.span(e, s0);
       const t = this.peek();
       if (t.t !== "op") return e;
       if (t.v === "." ) {
         const n = this.peek(1);
         if (n.t !== "id" && n.t !== "kw") return e;
         this.next(); this.next();
-        e = { k: "Member", e, name: n.v, line: this.line(n) };
+        e = this.span({ k: "Member", e, name: n.v, line: this.line(n) }, s0, n.s);
         continue;
       }
       if (t.v === "(") {
@@ -1339,14 +1476,14 @@ class Parser {
           this.expect("op", ")");
           return a;
         });
-        e = { k: "Call", callee: e, args, line: this.line(t) };
+        e = this.span({ k: "Call", callee: e, args, line: this.line(t) }, s0);
         continue;
       }
       if (t.v === "[") {
         if (t.sp && (head || e.k === "Lit")) return e;
         this.next();
         const index = this.withNL(1, () => { const i = this.expr(); this.expect("op", "]"); return i; });
-        e = { k: "Index", e, index, line: this.line(t) };
+        e = this.span({ k: "Index", e, index, line: this.line(t) }, s0);
         continue;
       }
       if (t.v === "<" && !t.sp && (e.k === "Ident" || e.k === "Member")) {
@@ -1752,6 +1889,9 @@ class Interp {
     this.routes = [];
     this.windows = [];
     this.line = 0;
+    this.at = null;        // the expression or statement being evaluated (with a source range)
+    this.stack = [];       // calls in progress: { name, call } with the node that made each call
+    this.color = !!opts.color;
     this.steps = 0;
     this.maxSteps = opts.maxSteps || 0;
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
@@ -1763,12 +1903,14 @@ class Interp {
     let prog;
     try { prog = parse(src, name); }
     catch (e) {
-      if (e instanceof CompileError) { this.errOut(`${name || "main.fw"}:${e.line}:${e.col}: error: ${e.message}`); return { status: 1, compileError: e }; }
+      if (e instanceof CompileError) { this.report(compileReport(e, name || "main.fw", src)); return { status: 1, compileError: e }; }
       throw e;
     }
     return this.exec(prog, repl);
   }
   exec(prog, repl) {
+    activeInterp = this;
+    this.stack = [];
     try {
       this.indexFunctions(prog);
       this.regs = null;
@@ -1793,7 +1935,8 @@ class Interp {
         if (typeof v === "bigint") return { status: Number(v), value: null };
         return { status: 0, value: v };
       }
-      if (e instanceof FwThrow) { this.errOut(`Flywheel runtime error: ${this.describeError(e.value)}${this.line ? ` (line ${this.line})` : ""}`); return { status: 1, error: e.value }; }
+      if (e instanceof FwThrow) { this.report(this.runtimeReport(e)); return { status: 1, error: e.value }; }
+      if (e instanceof CompileError) { this.report(compileReport(e, this.mainName || "main.fw", this.mainSource)); return { status: 1, compileError: e }; }
       if (e instanceof ExitSig) return { status: e.code, value: null };
       if (e instanceof RangeError && /call stack/i.test(e.message)) { this.errOut("Flywheel runtime error: stack overflow"); return { status: 1 }; }
       if (e instanceof StepLimit) { this.errOut("Flywheel runtime error: time limit exceeded (flywheel.js stops programs that run too long)"); return { status: 1 }; }
@@ -1802,6 +1945,37 @@ class Interp {
       return { status: 1 };
     }
   }
+  // Diagnostics go to opts.diagnostic as plain objects (see formatDiagnostic) when it is given,
+  // else to opts.error as text.
+  report(r) {
+    if (this.opts && this.opts.diagnostic) this.opts.diagnostic(r);
+    else this.errOut(formatDiagnostic(r, { color: this.color }));
+  }
+  // The traceback of a value being thrown, innermost first. Rethrowing the value keeps the
+  // traceback of the place it was first thrown.
+  traceFor(value) {
+    if (value !== null && typeof value === "object" && value === this.tracedValue) return this.tracedTrace;
+    const frames = [];
+    let at = this.at, omitted = 0, omittedAt = 0;
+    const n = this.stack.length + 1;
+    for (let i = this.stack.length; i >= 0; i--) {
+      const depth = this.stack.length - i, name = i > 0 ? this.stack[i - 1].name : "<module>";
+      if (n > TRACE_FRAMES && depth >= TRACE_FRAMES - 16 && i >= 16) { if (!omitted) omittedAt = frames.length; omitted++; }
+      else frames.push({ name, at });
+      if (i > 0) at = this.stack[i - 1].call;
+    }
+    const trace = { frames, omitted, omittedAt };
+    this.tracedValue = value; this.tracedTrace = trace;
+    return trace;
+  }
+  runtimeReport(e) {
+    const v = e.value;
+    let type = "", message = this.describeError(v);
+    if (v instanceof FwError && v.type !== "Error") { type = v.type; message = v.message; }
+    else if (v instanceof Instance) { type = v.cls.name; message = this.show(v, false); }
+    const t = e.trace || { frames: [], omitted: 0, omittedAt: 0 };
+    return { kind: "runtime", type, message, frames: t.frames.map(f => frameOf(f.at, f.name)), omitted: t.omitted, omittedAt: t.omittedAt };
+  }
   describeError(v) {
     if (v instanceof FwError) return v.type === "Error" ? v.message : `${v.type}: ${v.message}`;
     if (v instanceof Instance) return `${v.cls.name}: ${this.show(v, false)}`;
@@ -1809,14 +1983,20 @@ class Interp {
   }
   // Call a Flywheel function from the host (event handlers); returns an error string or null.
   callFromHost(fn, args) {
+    const savedActive = activeInterp, savedStack = this.stack;
+    activeInterp = this; this.stack = [];
     try { this.call(fn, args); return null; }
     catch (e) {
-      if (e instanceof FwThrow) return `Flywheel runtime error: ${this.describeError(e.value)}`;
+      if (e instanceof FwThrow) {
+        const r = this.runtimeReport(e);
+        if (this.opts && this.opts.diagnostic) { this.opts.diagnostic(r); return null; }
+        return formatDiagnostic(r);
+      }
       if (e instanceof StepLimit) return "Flywheel runtime error: time limit exceeded";
       if (e instanceof ExitSig) return null;
       if (e instanceof RangeError) return "Flywheel runtime error: stack overflow";
       return `flywheel.js internal error: ${e && e.message || e}`;
-    }
+    } finally { activeInterp = savedActive; this.stack = savedStack; }
   }
 
   /* ---------------- declarations */
@@ -1968,6 +2148,7 @@ class Interp {
   }
   execStmt(st, scope) {
     this.line = st.line || this.line;
+    if (st.s0 !== undefined) this.at = st;
     this.tick();
     switch (st.k) {
       case "Class": {
@@ -2504,7 +2685,17 @@ class Interp {
     if (t.name === "set" && v instanceof FwMap && v.size === 0) return new FwSet();
     return v;
   }
+  // A node with a source range is the current location while it evaluates; when it throws, the
+  // location stays where the error happened, for the traceback.
   eval(e, scope) {
+    if (e.s0 === undefined) return this.evalNode(e, scope);
+    const saved = this.at;
+    this.at = e;
+    const v = this.evalNode(e, scope);
+    this.at = saved;
+    return v;
+  }
+  evalNode(e, scope) {
     switch (e.k) {
       case "Lit": return e.v;
       case "Qty": this.line = e.line || this.line; return this.quantityLiteral(e.v, e.unit, null, e.text);
@@ -3026,12 +3217,13 @@ class Interp {
       else fail("RuntimeError", `${fn.name} is missing argument '${ps[i].name}'`);
       s.def(ps[i].name, this.coerce(v, ps[i].type));
     }
-    const prevCls = this.curCls, prevSettle = this.settle;
+    const prevCls = this.curCls, prevSettle = this.settle, depth = this.stack.length;
     this.curCls = frame.cls;
     this.settle = null;  // a deferred `when` is checked between the statements after it, not inside calls
+    this.stack.push({ name: fn.cls && fn.name !== "lambda" ? `${fn.cls.name}.${fn.name === "init" ? "constructor" : fn.name}` : fn.name, call: this.at });
     try { this.execBlock(fn.body, s); }
     catch (e) { if (e instanceof ReturnSig) return e.v; throw e; }
-    finally { this.curCls = prevCls; this.settle = prevSettle; }
+    finally { this.curCls = prevCls; this.settle = prevSettle; this.stack.length = depth; }
     return null;
   }
   // Destructors of the instances still alive run as the program ends (JavaScript cannot see
@@ -4255,6 +4447,7 @@ function run(source, opts) {
   opts = opts || {};
   const I = new Interp(opts);
   if (opts.stdin) I.stdin = opts.stdin.slice();
+  I.mainName = opts.name || "main.fw"; I.mainSource = source;
   const r = I.run(source, opts.name);
   r.interp = I;
   // an app: a top-level returned element, a served "/" route, or a desktop window
@@ -4268,7 +4461,7 @@ function run(source, opts) {
         else if (typeof v === "string") r.text = v;
         r.served = root.route;
       } catch (e) {
-        if (e instanceof FwThrow) { I.errOut(`Flywheel runtime error: ${I.describeError(e.value)}`); r.status = 1; } else throw e;
+        if (e instanceof FwThrow) { I.report(I.runtimeReport(e)); r.status = 1; } else throw e;
       }
     } else if (I.windows.length && I.windows[0].tree) { r.value = I.windows[0].tree; r.window = I.windows[0]; }
   }
@@ -4288,7 +4481,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, version: "2.11 (beta-11) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, formatDiagnostic, compileReport, excerptParts, version: "2.11 (beta-11) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

@@ -9,6 +9,13 @@ let I = null, appRoot = null, handlers = [], session = null, buffer = [], runId 
 function flush() { if (buffer.length) { postMessage({ type: "out", id: runId, lines: buffer }); buffer = []; } }
 function print(s) { buffer.push({ s }); if (buffer.length >= 200) flush(); }
 function error(s) { buffer.push({ s, err: true }); if (buffer.length >= 200) flush(); }
+// Tracebacks and compile errors arrive as reports (plain objects); the page renders them.
+// Each frame carries its excerpt markers (`x`), so the page needs no copy of flywheel.js.
+function diagnostic(r) {
+  for (const f of r.frames || []) f.x = Flywheel.excerptParts(f);
+  buffer.push({ diag: r });
+  if (buffer.length >= 200) flush();
+}
 
 // The preview document: <head> content, <body> attributes and content. Event attributes holding
 // Flywheel functions become data-fw-on* hooks whose numbers index `handlers`.
@@ -40,7 +47,7 @@ onmessage = e => {
     const t0 = performance.now();
     appRoot = null; handlers = [];
     let r;
-    try { r = Flywheel.run(m.code, { print, error, name: "main.fw", stdin: m.stdin }); }
+    try { r = Flywheel.run(m.code, { print, error, diagnostic, name: m.name || "main.fw", stdin: m.stdin }); }
     catch (err) { error("flywheel.js internal error: " + (err && err.message || err)); r = { status: 1 }; }
     I = r.interp || null;
     if (r.value instanceof Flywheel.FwElement) appRoot = r.value;
@@ -68,9 +75,20 @@ onmessage = e => {
     postMessage({ type: "app", id: m.id, app });
   } else if (m.type === "repl") {
     runId = m.id;
-    if (!session) session = new Flywheel.Session({ print, error });
+    if (!session) session = new Flywheel.Session({ print, error, diagnostic });
     try { session.exec(m.code); } catch (err) { error("flywheel.js internal error: " + (err && err.message || err)); }
     flush();
     postMessage({ type: "done", id: m.id, status: 0, repl: true });
+  } else if (m.type === "check") {
+    runId = m.id;
+    let ok = true;
+    try { Flywheel.parse(m.code, m.name); }
+    catch (err) {
+      ok = false;
+      if (err instanceof Flywheel.CompileError) diagnostic(Flywheel.compileReport(err, m.name, m.code));
+      else error("flywheel.js internal error: " + (err && err.message || err));
+    }
+    flush();
+    postMessage({ type: "checked", id: m.id, ok, name: m.name });
   } else if (m.type === "repl-reset") session = null;
 };

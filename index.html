@@ -204,6 +204,12 @@
   .ln { white-space: pre-wrap; word-break: break-word; min-height: 1.6em; }
   .o-dim { color: var(--dim); } .o-acc { color: var(--acc); } .o-err { color: var(--red); } .o-cyan { color: var(--cyan); }
   .o-vio { color: var(--violet); } .o-ok { color: var(--green); } .o-amb { color: var(--amber); }
+  /* tracebacks: the colors `flywheel` uses in a terminal */
+  .d-err { color: var(--red); font-weight: 700; } .d-type { color: var(--violet); font-weight: 700; }
+  .d-msg { color: var(--fg); font-weight: 600; } .d-fn { color: var(--fg); font-weight: 600; }
+  .d-loc { color: var(--cyan); } .d-loc:hover { text-decoration: underline; }
+  .d-gut { color: var(--faint, var(--dim)); } .d-span { color: var(--fg); font-weight: 600; }
+  .d-mark { color: var(--red); font-weight: 700; }
   .ps1 .u { color: var(--acc); } .ps1 .at { color: var(--faint); } .ps1 .d { color: var(--cyan); } .ps1 .s { color: var(--acc); }
   .ps1 .fw { color: var(--violet); }
   .prompt { display: flex; gap: 1ch; align-items: baseline; }

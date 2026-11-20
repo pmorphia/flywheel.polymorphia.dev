@@ -233,6 +233,18 @@ function edSet(code, name) {
   if (name) fileName.textContent = name;
   edRender(); $("#edBody").scrollTop = 0;
 }
+// Puts the caret at line:col of the editor (a traceback location was clicked).
+function edGoto(line, col) {
+  const lines = ed.value.split("\n");
+  let off = 0;
+  for (let i = 0; i < Math.min(line - 1, lines.length); i++) off += lines[i].length + 1;
+  off += Math.max(0, Math.min((col || 1) - 1, (lines[line - 1] || "").length));
+  ed.focus({ preventScroll: true });
+  ed.setSelectionRange(off, off);
+  const body = $("#edBody"), lh = parseFloat(getComputedStyle(ed).lineHeight) || 20;
+  body.scrollTop = Math.max(0, (line - 1) * lh - body.clientHeight / 3);
+  edQueue();
+}
 function insert(text) {
   ed.focus();
   if (!document.execCommand("insertText", false, text)) ed.setRangeText(text, ed.selectionStart, ed.selectionEnd, "end");
@@ -344,18 +356,31 @@ function stopProgram(reason) {
   return true;
 }
 function setRunState(text, cls) { edRun.className = cls || ""; edRun.textContent = text || ""; }
-function runProgram(code) {
+// `flywheel check`: parsed in the worker, which has flywheel.js; ids of checks in flight -> file name
+const checking = {};
+function checkProgram(code, name) {
+  const id = ++seq;
+  checking[id] = name;
+  getWorker().postMessage({ type: "check", id, code, name });
+}
+function runProgram(code, name) {
   if (code === undefined) code = ed.value;
+  name = name || fileName.textContent;
   if (pending) stopProgram("stopped (re-run)");
   const id = ++seq;
-  pending = { id, kind: "run", timer: setTimeout(() => stopProgram(`stopped: the program ran longer than ${TIMEOUT / 1000} s`), TIMEOUT) };
-  term.line(`${term.ps1Html()} <span class="k-cmd">flywheel</span> <span class="k-arg">run</span> <span class="k-arg">${esc(fileName.textContent)}</span>`);
+  pending = { id, kind: "run", name, timer: setTimeout(() => stopProgram(`stopped: the program ran longer than ${TIMEOUT / 1000} s`), TIMEOUT) };
+  term.line(`${term.ps1Html()} <span class="k-cmd">flywheel</span> <span class="k-arg">run</span> <span class="k-arg">${esc(name)}</span>`);
   setRunState("running…");
-  getWorker().postMessage({ type: "run", id, code });
+  getWorker().postMessage({ type: "run", id, code, name });
 }
 function onWorker(e) {
   const m = e.data;
-  if (m.type === "out") { for (const l of m.lines) l.err ? term.err(l.s) : term.text(l.s); return; }
+  if (m.type === "out") { for (const l of m.lines) l.diag ? term.diag(l.diag, checking[m.id] || (pending && pending.name) || true) : l.err ? term.err(l.s) : term.text(l.s); return; }
+  if (m.type === "checked") {
+    delete checking[m.id];
+    if (m.ok) term.line(`<span class="o-ok">✓</span> <span class="o-dim">${esc(m.name)} parses</span>`);
+    return;
+  }
   if (pending && m.id === pending.id) { clearTimeout(pending.timer); pending = null; }
   if (m.type === "done") {
     const ok = m.status === 0;
@@ -442,6 +467,60 @@ const term = (() => {
   const line = html => { out.insertAdjacentHTML("beforeend", `<div class="ln">${html}</div>`); trim(); scroll(); };
   const text = s => line(esc(s));
   const err = s => line(`<span class="o-err">${esc(s)}</span>`);
+  /* Tracebacks and compile errors, as `flywheel` prints them in a terminal: each location is a
+   * link to that line of the editor, followed by its source line with the failing range marked.
+   * `record` keeps the report (without source) for `flywheel --error FILE`. */
+  const diagLoc = f => `<a href="#" class="d-loc" data-goto="${f.line}:${f.col || 1}" data-file="${esc(f.file)}">${esc(f.file)}:${f.line}:${f.col || 1}</a>`;
+  function diag(r, record, opts) {
+    opts = opts || {};
+    const frames = r.frames || [];
+    if (r.kind === "compile") {
+      const f = frames[0];
+      line(`${f ? diagLoc(f) + ": " : ""}<span class="d-err">error:</span> <span class="d-msg">${esc(r.message)}</span>`);
+    } else {
+      const what = r.type ? `<span class="d-type">${esc(r.type)}</span>${r.bare ? "" : `: <span class="d-msg">${esc(r.message || "exception")}</span>`}` : `<span class="d-msg">${esc(r.message || "exception")}</span>`;
+      line(`<span class="d-err">Flywheel runtime error:</span> ${what}`);
+    }
+    const gutter = Math.max(1, ...frames.map(f => String(f.line).length));
+    const atLine = f => line(`  <span class="o-dim">at</span> ${diagLoc(f)} <span class="o-dim">in</span> <span class="d-fn">${esc(f.fn)}</span>`);
+    const same = (a, b) => a.file === b.file && a.fn === b.fn && a.line === b.line && a.col === b.col;
+    let covered = false;
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      if (r.omitted && i === r.omittedAt && !covered) line(`<span class="o-dim">  ... ${r.omitted} more frame${r.omitted === 1 ? "" : "s"} ...</span>`);
+      let repeats = 0, hidden = 0;
+      while (i + repeats + 1 < frames.length && same(f, frames[i + repeats + 1])) { if (r.omitted && i + repeats + 1 === r.omittedAt) hidden = r.omitted; repeats++; }
+      if (r.kind !== "compile") atLine(f);
+      const x = opts.source === false ? null : f.x;
+      if (x) {
+        const t = v => esc(v.replace(/\t/g, "    ")), w = v => [...v.replace(/\t/g, "    ")].length;
+        const num = String(f.line).padStart(gutter);
+        line(`    <span class="d-gut">${num} |</span> ${t(x.raw.slice(x.ind, x.start))}<span class="d-span">${t(x.raw.slice(x.start, x.end))}</span>${t(x.raw.slice(x.end))}`);
+        const mark = (x.whole ? "^" : "~").repeat(w(x.raw.slice(x.start, x.focus))) + "^".repeat(Math.max(1, w(x.raw.slice(x.focus, x.fend)))) + (x.whole ? "^" : "~").repeat(w(x.raw.slice(x.fend, x.end)));
+        line(`    <span class="d-gut">${" ".repeat(gutter)} |</span> ${" ".repeat(w(x.raw.slice(x.ind, x.start)))}<span class="d-mark">${mark}</span>`);
+      }
+      if (repeats >= 3) {
+        atLine(frames[i + 1]); atLine(frames[i + 2]);
+        const more = repeats - 2 + hidden;
+        line(`<span class="o-dim">  ... the same call ${more} more time${more === 1 ? "" : "s"} ...</span>`);
+        covered = covered || !!hidden;
+        i += repeats;
+      }
+    }
+    if (record) {
+      const kept = { ...r, frames: frames.map(({ text, x, ...f }) => f), time: Date.now() };
+      store.set("fw.lastError." + (record === true ? fileName.textContent : record), JSON.stringify(kept));
+    }
+  }
+  // `flywheel --error FILE`: the last error FILE stopped with in this browser, without source.
+  function lastError(file) {
+    let r = null;
+    try { r = JSON.parse(store.get("fw.lastError." + file, "null")); } catch (e) { r = null; }
+    if (!r) return err(`flywheel: no error recorded for ${file}`);
+    const d = new Date(r.time), two = n => String(n).padStart(2, "0");
+    line(`<span class="o-dim">last error of ${esc(file)}, ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}:</span>`);
+    diag(r, false, { source: false });
+  }
   function trim() { while (out.childElementCount > 1500) out.firstElementChild.remove(); }
 
   const open = (url, newTab = true) => {
@@ -459,19 +538,21 @@ const term = (() => {
     } },
     { name: "run", desc: "run the program in the editor", run() { runProgram(); } },
     { name: "flywheel", alias: ["fw"], desc: "flywheel run | check | repl | version", args: ["run", "check", "repl", "version", "help"], run(a) {
-        const short = { r: "run", c: "check", h: "help", "-h": "help", v: "version", "--version": "version" };
+        const short = { r: "run", c: "check", h: "help", "-h": "help", v: "version", "--version": "version", "-E": "--error" };
         const sub = Object.hasOwn(short, a[0]) ? short[a[0]] : a[0];
         if (!sub || sub === "help" || sub === "--help") {
           line(`usage: flywheel <command> [file]`);
           line(`  <span class="o-acc">run</span>, r [file]   <span class="o-dim">compile and run (here: the editor, or an example)</span>`);
           line(`  <span class="o-acc">check</span>, c [file] <span class="o-dim">parse without running</span>`);
           line(`  <span class="o-acc">repl</span>            <span class="o-dim">interactive session</span>`);
+          line(`  <span class="o-acc">--error</span>, -E [file] <span class="o-dim">the last error the file stopped with (locations, no source)</span>`);
           line(`  <span class="o-acc">version</span>, v      <span class="o-dim">print the version</span>`);
           line(`<span class="o-dim">the real compiler also has build, desktop, serve, test, format, doc and lsp — </span><a href="#" data-install>install it</a>`);
           return;
         }
         if (sub === "version") return text("flywheel 2.26 (beta-26) — flywheel.js 2.11 (beta-11), in your browser");
         if (sub === "repl") return startRepl();
+        if (sub === "--error") return lastError(a[1] || fileName.textContent);
         if (sub === "run" || sub === "check") {
           let code = ed.value;
           if (a[1] && a[1] !== fileName.textContent) {
@@ -479,9 +560,8 @@ const term = (() => {
             if (!x) return err(`flywheel: no such file: ${a[1]}`);
             code = x.code;
           }
-          if (sub === "run") return runProgram(code);
-          try { Flywheel.parse(code); line(`<span class="o-ok">✓</span> <span class="o-dim">${esc(a[1] || fileName.textContent)} parses</span>`); }
-          catch (e) { if (e instanceof Flywheel.CompileError) err(`${a[1] || fileName.textContent}:${e.line}:${e.col}: error: ${e.message}`); else throw e; }
+          if (sub === "run") return runProgram(code, a[1]);
+          checkProgram(code, a[1] || fileName.textContent);
           return;
         }
         err(`flywheel: '${sub}' isn't available in the playground (try run, check or repl)`);
@@ -620,7 +700,7 @@ const term = (() => {
   }
   function onRepl(e) {
     const m = e.data;
-    if (m.type === "out") { for (const l of m.lines) l.err ? err(l.s) : text(l.s); return; }
+    if (m.type === "out") { for (const l of m.lines) l.diag ? diag(l.diag, false) : l.err ? err(l.s) : text(l.s); return; }
     if (m.type === "done" && replPending && m.id === replPending.id) { clearTimeout(replPending.timer); replPending = null; }
   }
 
@@ -693,7 +773,14 @@ const term = (() => {
   setPs1();
   line(`<span class="o-acc">pmsh 1.0</span> <span class="o-dim">— the polymorphia shell, flywheel edition</span>`);
   line(`<span class="o-dim">try </span><span class="o-acc">help</span><span class="o-dim">, </span><span class="o-acc">ls</span><span class="o-dim">, </span><span class="o-acc">flywheel repl</span><span class="o-dim">, or press Ctrl+Enter in the editor</span>`);
-  return { line, text, err, ps1Html, run: submit, input };
+  out.addEventListener("click", e => {
+    const a = e.target.closest("[data-goto]"); if (!a) return;
+    e.preventDefault();
+    if (a.dataset.file !== fileName.textContent) return;
+    const [l, c] = a.dataset.goto.split(":").map(Number);
+    edGoto(l, c);
+  });
+  return { line, text, err, diag, lastError, ps1Html, run: submit, input };
 })();
 
 /* ================================================================ lessons */
