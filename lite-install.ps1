@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Flywheel Lite installer for Windows: builds and installs Flywheel Lite (flywheel-lite, with the
-    short alias fwl), the bytecode VM that runs Flywheel programs without LLVM.
+    Flywheel Lite installer for Windows: installs Flywheel Lite (flywheel-lite, with the short
+    alias fwl), the bytecode VM that runs Flywheel programs without LLVM.
 
 .DESCRIPTION
     Run from PowerShell (no administrator rights needed):
@@ -13,17 +13,22 @@
         & ([scriptblock]::Create((irm https://flywheel.polymorphia.dev/lite-install.ps1))) -Yes
 
     What it sets up:
-      - A C compiler: the Visual Studio C++ tools if installed, otherwise MinGW gcc if it is on
+      - Flywheel Lite in %LOCALAPPDATA%\Programs\Flywheel Lite, added to your user PATH. By
+        default this is the prebuilt flywheel-lite.exe from the newest Flywheel Lite release,
+        checked against the release's SHA256SUMS, so no build tools are needed.
+      - Only when building from source (-FromSource, -Ref, -Source, or no prebuilt release): a
+        C compiler. The Visual Studio C++ tools if installed, otherwise MinGW gcc if it is on
         PATH, otherwise Visual Studio 2022 Build Tools through winget (after asking; Windows
         shows its own elevation prompt).
-      - Flywheel Lite in %LOCALAPPDATA%\Programs\Flywheel Lite, added to your user PATH.
 
     Flywheel Lite needs nothing else: no LLVM, no CMake, and nothing at run time.
 
 .EXAMPLE
     .\lite-install.ps1 -Yes
 .EXAMPLE
-    .\lite-install.ps1 -Ref v0.1.0 -Prefix D:\Tools\FlywheelLite
+    .\lite-install.ps1 -Version v2.13-beta-13 -Prefix D:\Tools\FlywheelLite
+.EXAMPLE
+    .\lite-install.ps1 -FromSource -Ref main
 .EXAMPLE
     .\lite-install.ps1 -Uninstall
 #>
@@ -31,7 +36,11 @@
 param(
     # Installation directory.
     [string]$Prefix = $(if ($env:LITE_PREFIX) { $env:LITE_PREFIX } else { Join-Path $env:LOCALAPPDATA 'Programs\Flywheel Lite' }),
-    # Flywheel Lite branch, tag, or commit to build.
+    # Prebuilt release to install (default: the newest).
+    [string]$Version,
+    # Build from source instead of downloading a prebuilt executable.
+    [switch]$FromSource,
+    # Flywheel Lite branch, tag, or commit to build (implies -FromSource).
     [string]$Ref = 'main',
     # Flywheel branch, tag, or commit whose library modules are embedded.
     [string]$FlywheelRef = 'main',
@@ -39,7 +48,7 @@ param(
     [string]$Source,
     # Take the library modules from a local Flywheel checkout (default with -Source: its parent).
     [string]$FlywheelSource,
-    # C compiler to build with.
+    # C compiler to build with from source.
     [ValidateSet('Auto', 'MSVC', 'GCC')]
     [string]$Compiler = 'Auto',
     # Answer yes to every question.
@@ -268,6 +277,49 @@ function Install-BuildTools {
     return 'MSVC'
 }
 
+# --- Prebuilt executable (published by flywheel-lite's release workflow) -------------------------
+
+# The release asset for this machine, or $null. Windows on Arm runs the x64 build under emulation.
+function Get-PrebuiltTarget {
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    if ($arch -in 'AMD64', 'ARM64') { return 'windows-x86_64' }
+    return $null
+}
+
+# Downloads and installs the prebuilt flywheel-lite.exe. Returns $false (having said why) when
+# there is none to download, so Main can build from source instead.
+function Install-Prebuilt {
+    $target = Get-PrebuiltTarget
+    if (-not $target) { Write-Info "there is no prebuilt Flywheel Lite for $env:PROCESSOR_ARCHITECTURE Windows"; return $false }
+    $asset = "flywheel-lite-$target.zip"
+    $base = if ($Version) { "$LiteRepo/releases/download/$Version" } else { "$LiteRepo/releases/latest/download" }
+    $label = if ($Version) { $Version } else { '(newest release)' }
+    Write-Step "Downloading Flywheel Lite $label for $target"
+    $zip = Join-Path $Work $asset
+    $sums = Join-Path $Work 'SHA256SUMS'
+    $where = if ($Version) { $Version } else { 'the newest release' }
+    try { Get-File "$base/$asset" $zip } catch { Write-Info "no prebuilt $asset in $where of $LiteRepo"; return $false }
+    try { Get-File "$base/SHA256SUMS" $sums } catch { Write-Info 'the release has no SHA256SUMS to check the download against'; return $false }
+    $unpacked = Join-Path $Work 'prebuilt'
+    $exe = Join-Path $unpacked 'flywheel-lite.exe'
+    if (-not $DryRun) {
+        $expected = $null
+        foreach ($line in Get-Content $sums) {
+            $parts = $line.Trim() -split '\s+', 2
+            if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -eq $asset) { $expected = $parts[0] }
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash
+        if (-not $expected -or $expected -ine $actual) { Stop-Install "the downloaded $asset does not match its checksum in SHA256SUMS; not installing it" }
+        Write-Ok 'checksum verified'
+        Expand-Archive -Path $zip -DestinationPath $unpacked -Force
+        if (-not (Test-Path $exe)) { Stop-Install "$asset does not contain flywheel-lite.exe" }
+        # Files downloaded from the internet carry a mark that makes Windows warn before running them.
+        Unblock-File -Path $exe -ErrorAction SilentlyContinue
+    }
+    Install-Binary $exe
+    return $true
+}
+
 # --- Flywheel Lite -----------------------------------------------------------------------------------
 
 # The library modules to embed, as CMakeLists.txt lists them.
@@ -322,7 +374,11 @@ function Install-Lite([string]$Toolchain) {
             '-o', $exe) + $sources + @('-lm', '-static', "-Wl,--stack,$StackSize")) -Quiet
     }
     if (-not $DryRun) { Write-Ok "built $exe" }
+    Install-Binary $exe
+}
 
+# $Exe becomes $Prefix\bin\flywheel-lite.exe, with the fwl alias.
+function Install-Binary([string]$Exe) {
     Write-Step "Installing Flywheel Lite into $Prefix"
     $bin = Join-Path $Prefix 'bin'
     $target = Join-Path $bin 'flywheel-lite.exe'
@@ -431,6 +487,11 @@ Install Flywheel Lite (runs Flywheel programs on a bytecode VM) on Windows.
 
 Where and what
   -Prefix DIR          install directory (default: %LOCALAPPDATA%\Programs\Flywheel Lite)
+  -Version TAG         install the prebuilt executable of release TAG (default: the newest)
+  -FromSource          build from source instead of downloading a prebuilt executable
+                       (needs a C compiler; Visual Studio Build Tools are installed if missing)
+
+Building from source (any of these implies -FromSource)
   -Ref REF             Flywheel Lite branch, tag, or commit to build (default: main)
   -FlywheelRef REF     Flywheel branch, tag, or commit whose library modules are embedded
   -Source DIR          build Flywheel Lite from a local checkout
@@ -465,20 +526,42 @@ function Main {
 
     if ($Uninstall) { Invoke-Uninstall; return }
 
+    # Auto: prebuilt if there is one for this machine, else build. Binary: prebuilt only.
+    $buildFromSource = $FromSource -or $Source -or $FlywheelSource -or $Ref -ne 'main' -or $FlywheelRef -ne 'main'
+    if ($Version -and $buildFromSource) { Stop-Install '-Version installs a prebuilt release; to build a tag from source use -Ref TAG' }
+
     Write-Host 'Flywheel Lite installer' -ForegroundColor White
-    $origin = if ($Source) { $Source } else { "$LiteRepo @ $Ref" }
-    $library = if ($FlywheelSource) { $FlywheelSource } else { "$FlywheelRepo @ $FlywheelRef" }
-    Write-Info "Lite:      $Prefix  ($origin)"
-    Write-Info "Library:   $library"
+    if ($buildFromSource) {
+        $origin = if ($Source) { $Source } else { "$LiteRepo @ $Ref" }
+        $library = if ($FlywheelSource) { $FlywheelSource } else { "$FlywheelRepo @ $FlywheelRef" }
+        Write-Info "Lite:      $Prefix  (build $origin)"
+        Write-Info "Library:   $library"
+    } else {
+        $release = if ($Version) { $Version } else { 'newest release' }
+        Write-Info "Lite:      $Prefix  (prebuilt, $LiteRepo $release)"
+    }
     if ($DryRun) { Write-Info 'dry run: nothing will be changed' }
 
-    # One step each: build tools, download (unless both are local), build, install, PATH.
-    $Progress.Total = 3 + [int](-not ($Source -and $FlywheelSource)) + [int](-not $NoModifyPath)
     $Work = New-WorkDirectory
     $environment = Save-Environment
     try {
-        $toolchain = Install-BuildTools
-        Install-Lite $toolchain
+        $installed = $false
+        if (-not $buildFromSource) {
+            # One step each: download, install, PATH.
+            $Progress.Total = 2 + [int](-not $NoModifyPath)
+            $installed = Install-Prebuilt
+            if (-not $installed) {
+                if ($Version) { Stop-Install "cannot install the prebuilt release $Version; rerun with -FromSource to build it" }
+                Write-Info 'building from source instead (needs a C compiler)'
+            }
+        }
+        if (-not $installed) {
+            # One step each: build tools, download (unless both are local), build, install, PATH,
+            # after any steps already taken by a prebuilt download that found nothing.
+            $Progress.Total = $Progress.Done + 3 + [int](-not ($Source -and $FlywheelSource)) + [int](-not $NoModifyPath)
+            $toolchain = Install-BuildTools
+            Install-Lite $toolchain
+        }
         Add-ToPath
     } finally {
         Restore-Environment $environment
