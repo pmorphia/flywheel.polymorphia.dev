@@ -391,11 +391,18 @@ install_lite() {
 # ---------------------------------------------------------------------------------------------
 # Prebuilt executables (published by flywheel-lite's release workflow)
 
+# Systems on musl (Alpine) take the static executable, which cannot load native C/C++ imports.
+musl_suffix() {
+    local about
+    about="$(ldd --version 2>&1 || true)"
+    if [[ "$about" == *musl* ]]; then echo -musl; fi
+}
+
 # The release asset for this machine, or nothing if there is none.
 prebuilt_target() {
     case "$os:$(uname -m)" in
-    linux:x86_64 | linux:amd64) echo linux-x86_64 ;;
-    linux:aarch64 | linux:arm64) echo linux-aarch64 ;;
+    linux:x86_64 | linux:amd64) echo "linux-x86_64$(musl_suffix)" ;;
+    linux:aarch64 | linux:arm64) echo "linux-aarch64$(musl_suffix)" ;;
     macos:*) echo macos-universal ;;
     esac
 }
@@ -451,6 +458,10 @@ install_prebuilt() {
     if [[ "$os" == macos ]] && ((!dry_run)); then
         # Downloads through a browser are quarantined; this one is not, but clear it to be sure.
         xattr -d com.apple.quarantine "$work/prebuilt/flywheel-lite" 2>/dev/null || true
+    fi
+    if ((!dry_run)) && ! "$work/prebuilt/flywheel-lite" --version >/dev/null 2>&1; then
+        info "the prebuilt $asset does not run here (it needs glibc 2.28 or newer)"
+        return 1
     fi
     install_binary "$work/prebuilt/flywheel-lite"
 }
