@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Flywheel Lite installer for Linux and macOS: builds and installs Flywheel Lite (flywheel-lite,
-# with the short alias fwl), the bytecode VM that runs Flywheel programs without LLVM.
+# Flywheel Lite installer for Linux and macOS: installs Flywheel Lite (flywheel-lite, with the
+# short alias fwl), the bytecode VM that runs Flywheel programs without LLVM.
 #
 #   curl -fsSL https://flywheel.polymorphia.dev/lite-install.sh | bash
 #   curl -fsSL https://flywheel.polymorphia.dev/lite-install.sh | bash -s -- --yes
 #
-# Run with --help for options. Flywheel Lite needs only a C compiler and make. Nothing is installed
-# system-wide except those, from your package manager (listed and confirmed before sudo is used),
-# or Apple's Command Line Tools on macOS.
+# Run with --help for options. By default it downloads a prebuilt executable from the newest
+# Flywheel Lite release (static on Linux, universal on macOS), so no build tools are needed.
+# Only when building from source (--from-source, --ref, --source, or no prebuilt executable for
+# your machine) does it need a C compiler and make, which it installs from your package manager
+# (listed and confirmed before sudo is used) or Apple's Command Line Tools on macOS.
 #
 # The whole script is inside functions and `main` runs on the last line, so a partially
 # downloaded copy does nothing.
@@ -23,6 +25,9 @@ PATH_END="# <<< flywheel-lite <<<"
 # Options
 
 prefix="${LITE_PREFIX:-$HOME/.local/flywheel-lite}"
+# auto: prebuilt if this machine has one, else build; binary: prebuilt only; source: build.
+mode=auto
+version=""
 ref="main"
 flywheel_ref="main"
 source_dir=""
@@ -42,6 +47,11 @@ Usage: lite-install.sh [options]
 
 Where and what
   --prefix DIR            install Flywheel Lite into DIR (default: ~/.local/flywheel-lite)
+  --version TAG           install the prebuilt executable of release TAG (default: the newest)
+  --from-source           build from source instead of downloading a prebuilt executable
+                          (needs a C compiler and make; installed if missing)
+
+Building from source (any of these implies --from-source)
   --ref REF               Flywheel Lite branch, tag, or commit to build (default: main)
   --flywheel-ref REF      Flywheel branch, tag, or commit whose library modules are
                           embedded (default: main)
@@ -60,7 +70,7 @@ Behaviour
 
 Environment
   LITE_PREFIX             same as --prefix
-  CC                      C compiler to build with (default: cc)
+  CC                      C compiler to build with from source (default: cc)
   NO_COLOR                disable coloured output
 EOF
 }
@@ -70,14 +80,17 @@ parse_args() {
         case "$1" in
         --prefix) prefix="${2:?--prefix needs a directory}"; shift ;;
         --prefix=*) prefix="${1#*=}" ;;
-        --ref) ref="${2:?--ref needs a branch, tag, or commit}"; shift ;;
-        --ref=*) ref="${1#*=}" ;;
-        --flywheel-ref) flywheel_ref="${2:?--flywheel-ref needs a branch, tag, or commit}"; shift ;;
-        --flywheel-ref=*) flywheel_ref="${1#*=}" ;;
-        --source) source_dir="${2:?--source needs a directory}"; shift ;;
-        --source=*) source_dir="${1#*=}" ;;
-        --flywheel-source) flywheel_source="${2:?--flywheel-source needs a directory}"; shift ;;
-        --flywheel-source=*) flywheel_source="${1#*=}" ;;
+        --version) version="${2:?--version needs a release tag}"; shift ;;
+        --version=*) version="${1#*=}" ;;
+        --from-source) mode=source ;;
+        --ref) ref="${2:?--ref needs a branch, tag, or commit}"; mode=source; shift ;;
+        --ref=*) ref="${1#*=}"; mode=source ;;
+        --flywheel-ref) flywheel_ref="${2:?--flywheel-ref needs a branch, tag, or commit}"; mode=source; shift ;;
+        --flywheel-ref=*) flywheel_ref="${1#*=}"; mode=source ;;
+        --source) source_dir="${2:?--source needs a directory}"; mode=source; shift ;;
+        --source=*) source_dir="${1#*=}"; mode=source ;;
+        --flywheel-source) flywheel_source="${2:?--flywheel-source needs a directory}"; mode=source; shift ;;
+        --flywheel-source=*) flywheel_source="${1#*=}"; mode=source ;;
         -y | --yes) assume_yes=1 ;;
         --no-deps) install_deps=0 ;;
         --no-modify-path) modify_path=0 ;;
@@ -91,6 +104,10 @@ parse_args() {
     done
     prefix="${prefix/#\~/$HOME}"
     [[ "$prefix" = /* ]] || prefix="$PWD/$prefix"
+    if [[ -n "$version" ]]; then
+        [[ "$mode" != source ]] || die "--version installs a prebuilt release; to build a tag from source use --ref TAG"
+        mode=binary
+    fi
     if [[ -n "$source_dir" ]]; then
         source_dir="$(cd "$source_dir" && pwd)" || die "--source: no such directory"
         [[ -f "$source_dir/Makefile" && -f "$source_dir/tools/embed.c" ]] ||
@@ -368,11 +385,82 @@ install_lite() {
         die "building Flywheel Lite failed (log above)"
     fi
     ((dry_run)) || ok "built $build/flywheel-lite"
+    install_binary "$build/flywheel-lite"
+}
 
+# ---------------------------------------------------------------------------------------------
+# Prebuilt executables (published by flywheel-lite's release workflow)
+
+# The release asset for this machine, or nothing if there is none.
+prebuilt_target() {
+    case "$os:$(uname -m)" in
+    linux:x86_64 | linux:amd64) echo linux-x86_64 ;;
+    linux:aarch64 | linux:arm64) echo linux-aarch64 ;;
+    macos:*) echo macos-universal ;;
+    esac
+}
+
+sha256_of() {
+    if have sha256sum; then
+        sha256sum "$1" | awk '{print $1}'
+    elif have shasum; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+# Downloads and installs the prebuilt executable. Returns 1 (having said why) when there is none
+# to download, so main can build from source instead.
+install_prebuilt() {
+    local target asset base
+    target="$(prebuilt_target)"
+    if [[ -z "$target" ]]; then
+        info "there is no prebuilt Flywheel Lite for $(uname -s) $(uname -m)"
+        return 1
+    fi
+    have curl || have wget || {
+        info "downloading a prebuilt executable needs curl or wget"
+        return 1
+    }
+    asset="flywheel-lite-$target.tar.gz"
+    if [[ -n "$version" ]]; then
+        base="$LITE_REPO/releases/download/$version"
+    else
+        base="$LITE_REPO/releases/latest/download"
+    fi
+    step "Downloading Flywheel Lite ${version:-(newest release)} for $target"
+    if ! fetch "$base/$asset" "$work/$asset" 2>/dev/null; then
+        info "no prebuilt $asset in ${version:-the newest release} of $LITE_REPO"
+        return 1
+    fi
+    if ! fetch "$base/SHA256SUMS" "$work/SHA256SUMS" 2>/dev/null; then
+        info "the release has no SHA256SUMS to check the download against"
+        return 1
+    fi
+    if ((!dry_run)); then
+        local expected actual
+        expected="$(awk -v name="$asset" '$2 == name || $2 == "*" name {print $1}' "$work/SHA256SUMS")"
+        actual="$(sha256_of "$work/$asset")" || die "need sha256sum or shasum to check the download"
+        [[ -n "$expected" && "$expected" == "$actual" ]] ||
+            die "the downloaded $asset does not match its checksum in SHA256SUMS; not installing it"
+        ok "checksum verified"
+    fi
+    run mkdir -p "$work/prebuilt"
+    run tar -xzf "$work/$asset" -C "$work/prebuilt"
+    if [[ "$os" == macos ]] && ((!dry_run)); then
+        # Downloads through a browser are quarantined; this one is not, but clear it to be sure.
+        xattr -d com.apple.quarantine "$work/prebuilt/flywheel-lite" 2>/dev/null || true
+    fi
+    install_binary "$work/prebuilt/flywheel-lite"
+}
+
+# install_binary FILE: FILE becomes $prefix/bin/flywheel-lite, with the fwl alias.
+install_binary() {
     step "Installing Flywheel Lite into $prefix"
     run mkdir -p "$prefix/bin"
     # Copy to a temporary name and rename, so a running flywheel-lite is never overwritten in place.
-    run cp "$build/flywheel-lite" "$prefix/bin/flywheel-lite.new"
+    run cp "$1" "$prefix/bin/flywheel-lite.new"
     run chmod 755 "$prefix/bin/flywheel-lite.new"
     run mv -f "$prefix/bin/flywheel-lite.new" "$prefix/bin/flywheel-lite"
     # fwl is a shorter name for flywheel-lite: a symlink next to it, so it works in every shell
@@ -497,16 +585,35 @@ main() {
     fi
 
     printf '%sFlywheel Lite installer%s\n' "$bold" "$reset"
-    info "Lite:      $prefix  (${source_dir:-$LITE_REPO @ $ref})"
-    info "Library:   ${flywheel_source:-$FLYWHEEL_REPO @ $flywheel_ref}"
+    if [[ "$mode" == source ]]; then
+        info "Lite:      $prefix  (build ${source_dir:-$LITE_REPO @ $ref})"
+        info "Library:   ${flywheel_source:-$FLYWHEEL_REPO @ $flywheel_ref}"
+    else
+        info "Lite:      $prefix  (prebuilt, $LITE_REPO ${version:-newest release})"
+    fi
     if ((dry_run)); then info "${yellow}dry run: nothing will be changed${reset}"; fi
 
-    # One step each: build tools, download (unless both are local), build, install, PATH.
-    progress_total=$((3 + modify_path))
-    if [[ -z "$source_dir" || -z "$flywheel_source" ]]; then progress_total=$((progress_total + 1)); fi
     make_workdir
-    check_deps
-    install_lite
+    local built=0
+    if [[ "$mode" != source ]]; then
+        # One step each: download, install, PATH.
+        progress_total=$((2 + modify_path))
+        if install_prebuilt; then
+            built=1
+        elif [[ "$mode" == binary ]]; then
+            die "cannot install the prebuilt release${version:+ $version}; rerun with --from-source to build it"
+        else
+            info "building from source instead (needs a C compiler and make)"
+        fi
+    fi
+    if ((!built)); then
+        # One step each: build tools, download (unless both are local), build, install, PATH.
+        # (after any steps already taken by a prebuilt download that found nothing)
+        progress_total=$((progress_done + 3 + modify_path))
+        if [[ -z "$source_dir" || -z "$flywheel_source" ]]; then progress_total=$((progress_total + 1)); fi
+        check_deps
+        install_lite
+    fi
     add_to_path
 
     if ((dry_run)); then
