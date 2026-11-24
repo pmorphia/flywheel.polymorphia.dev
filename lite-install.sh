@@ -469,7 +469,7 @@ install_binary() {
     if ((!dry_run)); then
         local version out
         version="$("$prefix/bin/flywheel-lite" --version)" || die "the installed flywheel-lite does not run"
-        out="$("$prefix/bin/flywheel-lite" -s 'print 6 * 7' 2>&1)" || die "the installed flywheel-lite cannot run a program: $out"
+        out="$("$prefix/bin/flywheel-lite" --source 'print 6 * 7' 2>&1)" || die "the installed flywheel-lite cannot run a program: $out"
         [[ "$out" == 42 ]] || die "the installed flywheel-lite printed '$out' for 'print 6 * 7' instead of 42"
         "$prefix/bin/fwl" --version >/dev/null || die "the fwl alias does not run"
         ok "$version"

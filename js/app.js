@@ -909,7 +909,7 @@ function paintInstall() {
         ${method("From source", "any C11 compiler; the build embeds library modules from a Flywheel checkout", cmdBox(it.src, "src"))}
       </div>
       <p class="inote">${esc(it.note)}</p>
-      <p class="inote">Run programs with <code>flywheel-lite hello.fw</code> or the short alias <code>fwl hello.fw</code>; start a session with <code>fwl repl</code>. Native executables, static type checking, networking, databases, threads and native imports need the compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;
+      <p class="inote">Run programs with <code>flywheel-lite hello.fw</code> or the short alias <code>fwl hello.fw</code>; start a session with <code>fwl --repl</code>. Native executables, static type checking, networking, databases, threads and native imports need the compiler; switch to <b style="color:#d4ff3a">flywheel</b> above for those.</p>`;
   } else {
     COPY.tag = JS_INSTALL.tag; COPY.npx = JS_INSTALL.npx; COPY.npm = JS_INSTALL.npm;
     html = `<h3>Use <em>flywheel.js</em></h3><p>It is already running on this page. Nothing to install for the browser; one file for everything else.</p>

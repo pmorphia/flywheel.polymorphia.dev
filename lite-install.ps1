@@ -397,7 +397,7 @@ function Install-Binary([string]$Exe) {
 
     $version = Invoke-Probe { & $target --version 2>&1 }
     if ($LASTEXITCODE -ne 0) { Stop-Install 'the installed flywheel-lite does not run' }
-    $output = "$(Invoke-Probe { & $target -s 'print 6 * 7' 2>&1 })".Trim()
+    $output = "$(Invoke-Probe { & $target --source 'print 6 * 7' 2>&1 })".Trim()
     if ($LASTEXITCODE -ne 0 -or $output -ne '42') { Stop-Install "the installed flywheel-lite printed '$output' for 'print 6 * 7' instead of 42" }
     Invoke-Probe { & (Join-Path $bin 'fwl.exe') --version 2>&1 } | Out-Null
     if ($LASTEXITCODE -ne 0) { Stop-Install 'the fwl alias does not run' }
@@ -575,7 +575,7 @@ function Main {
     Write-Host 'Flywheel Lite is installed.' -ForegroundColor Green
     Write-Info 'Try:'
     Write-Info "  'print `"Hello, world!`"' | Set-Content hello.fw; flywheel-lite hello.fw"
-    Write-Info '(fwl is a short alias for flywheel-lite: fwl hello.fw; fwl repl starts a session)'
+    Write-Info '(fwl is a short alias for flywheel-lite: fwl hello.fw; fwl --repl starts a session)'
 }
 
 try {
